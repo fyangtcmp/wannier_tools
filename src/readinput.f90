@@ -155,6 +155,7 @@ subroutine readinput
    w3d_nested_calc =.false.
    ChargeDensity_selected_bands_calc= .FALSE.
    ChargeDensity_selected_energies_calc= .FALSE.
+   sigma_SOAHC_int_calc = .FALSE.
 
    read(1001, CONTROL, iostat=stat)
    SlabQPI_kplane_calc= SlabQPI_kplane_calc.or.SlabQPI_calc
@@ -211,6 +212,7 @@ subroutine readinput
       write(*, *)"ChargeDensity_selected_energies_calc"
       write(*, *)"ChargeDensity_selected_bands_calc"
       write(*, *)"The default Vaule is F"
+      write(*, *)"sigma_SOAHC_int_calc"
 
       backspace(1001)
       read(1001,fmt='(A)') inline
@@ -283,10 +285,11 @@ subroutine readinput
       write(stdout, *) "LandauLevel_k_dos_calc            : ", LandauLevel_k_dos_calc
       write(stdout, *) "LandauLevel_B_dos_calc            : ", LandauLevel_B_dos_calc
       write(stdout, *) "FermiLevel_calc                   : ", FermiLevel_calc
-      write(stdout, *) "ANE_calc                      : ", ANE_calc
+      write(stdout, *) "ANE_calc                          : ", ANE_calc
       write(stdout, *) "Symmetry_Import_calc              : ", Symmetry_Import_calc
       write(stdout, *) "ChargeDensity_selected_bands_calc : ", ChargeDensity_selected_bands_calc
       write(stdout, *) "ChargeDensity_selected_energies_calc : ", ChargeDensity_selected_energies_calc
+      write(stdout, *) "sigma_SOAHC_int_calc              : ", sigma_SOAHC_int_calc
    endif
 
 !===============================================================================================================!

@@ -774,6 +774,16 @@
         if(cpuid.eq.0)write(stdout, *)'End of calculating the spin texture for surface'
      endif
 
+     !> calculate the intrinsic second-order Hall conductivity
+     if (sigma_SOAHC_int_calc)then
+        if(cpuid.eq.0)write(stdout, *)' '
+        if(cpuid.eq.0)write(stdout, *)
+        call sigma_SOAHC_int
+        call now(time_end)
+        call print_time_cost(time_start, time_end, 'sigma_SOAHC_int')
+        if(cpuid.eq.0)write(stdout, *)
+     endif
+
      call now(time_end)
 
      if(cpuid.eq.0)write(stdout, *)' '
