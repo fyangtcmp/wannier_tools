@@ -156,6 +156,7 @@ subroutine readinput
    ChargeDensity_selected_bands_calc= .FALSE.
    ChargeDensity_selected_energies_calc= .FALSE.
    sigma_SOAHC_int_calc = .FALSE.
+   sigma_NPHC_int_calc = .FALSE.
 
    read(1001, CONTROL, iostat=stat)
    SlabQPI_kplane_calc= SlabQPI_kplane_calc.or.SlabQPI_calc
@@ -213,6 +214,7 @@ subroutine readinput
       write(*, *)"ChargeDensity_selected_bands_calc"
       write(*, *)"The default Vaule is F"
       write(*, *)"sigma_SOAHC_int_calc"
+      write(*, *)"sigma_NPHC_int_calc"
 
       backspace(1001)
       read(1001,fmt='(A)') inline
@@ -290,6 +292,7 @@ subroutine readinput
       write(stdout, *) "ChargeDensity_selected_bands_calc : ", ChargeDensity_selected_bands_calc
       write(stdout, *) "ChargeDensity_selected_energies_calc : ", ChargeDensity_selected_energies_calc
       write(stdout, *) "sigma_SOAHC_int_calc              : ", sigma_SOAHC_int_calc
+      write(stdout, *) "sigma_NPHC_int_calc               : ", sigma_NPHC_int_calc
    endif
 
 !===============================================================================================================!

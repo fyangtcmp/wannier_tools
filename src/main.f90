@@ -784,6 +784,16 @@
         if(cpuid.eq.0)write(stdout, *)
      endif
 
+     !> calculate the intrinsic nonlinear planar Hall conductivity
+     if (sigma_NPHC_int_calc)then
+        if(cpuid.eq.0)write(stdout, *)' '
+        if(cpuid.eq.0)write(stdout, *)
+        call sigma_NPHC_int
+        call now(time_end)
+        call print_time_cost(time_start, time_end, 'sigma_NPHC_int')
+        if(cpuid.eq.0)write(stdout, *)
+     endif
+
      call now(time_end)
 
      if(cpuid.eq.0)write(stdout, *)' '

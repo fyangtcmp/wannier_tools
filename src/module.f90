@@ -449,6 +449,7 @@
      logical :: w3d_nested_calc = .false.
 
      logical :: sigma_SOAHC_int_calc = .false.
+     logical :: sigma_NPHC_int_calc = .false.
      
      namelist / Control / BulkBand_calc, BulkFS_calc,  BulkFS_Plane_calc, &
                           BulkFS_plane_stack_calc,  BulkGap_plane_calc, &
@@ -481,7 +482,7 @@
                           LandauLevel_B_dos_calc,LanczosBand_calc,LanczosDos_calc, &
                           LandauLevel_B_calc, LandauLevel_kplane_calc,landau_chern_calc, &
                           FermiLevel_calc,ANE_calc, export_newhr,export_maghr,w3d_nested_calc, &
-                          sigma_SOAHC_int_calc
+                          sigma_SOAHC_int_calc, sigma_NPHC_int_calc
 
      integer :: Nslab  ! Number of slabs for 2d Slab system
      integer :: Nslab1 ! Number of slabs for 1D wire system
