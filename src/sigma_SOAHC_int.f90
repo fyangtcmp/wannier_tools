@@ -19,10 +19,21 @@ subroutine sigma_SOAHC_int
    integer :: m, n, ie
    integer :: ierr, knv3
    
-   real(dp) :: Beta_fake
+   real(dp) :: Beta_fake, mu, diffFermi
    real(dp) :: k(3)
    
    real(dp) :: time_start, time_end
+
+   ! The energy threshold to judge the degenerate bands 
+   ! The intrinsic SOAHC is usually calculated in PT-symmetric materials, with double degenerate bands.
+   ! And for normal hr.dat, the numerical error between two physical degenerate bands is about 0.1~ meV.
+   ! So we set it to 1meV = 3.6749d-5 Hartree, a relatively large value. It will lead to smoother curves of the conductivities.
+   ! If you want larger peaks of the conductivities, or you have symmetrized your hr.dat to reduce the numerical error,
+   ! you can set the threshold to a smaller value like 0.01meV = 3.6749d-7. 
+   real(dp), parameter :: degeneracy_threshold = 3.6749d-5
+   ! real(dp), parameter :: degeneracy_threshold = 3.6749d-7
+
+   real(dp), parameter :: Hartree2J = 4.359748d-18 
    
    ! eigen value of H
    real(dp), allocatable    :: W(:)
@@ -38,7 +49,6 @@ subroutine sigma_SOAHC_int
    
    !> conductivity  dim = OmegaNum
    real(dp), allocatable :: energy(:)
-   real(dp), allocatable :: diffFermi(:)
 
    real(dp), allocatable :: sigma_xyytensor_ahc(:)
    real(dp), allocatable :: sigma_yxxtensor_ahc(:)
@@ -54,7 +64,7 @@ subroutine sigma_SOAHC_int
    allocate( Vmn_Ham(Num_wann, Num_wann, 3))
    allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
    
-   allocate( energy(OmegaNum), diffFermi(OmegaNum))
+   allocate( energy(OmegaNum))
 
    allocate( sigma_xyytensor_ahc        (OmegaNum))
    allocate( sigma_yxxtensor_ahc        (OmegaNum))
@@ -122,7 +132,7 @@ subroutine sigma_SOAHC_int
          G_xx=0d0; G_xy=0d0; G_yx=0d0; G_yy=0d0
 
          do n= 1, Num_wann
-            if (ABS(W(m)-W(n))<3.6749d-5) cycle ! the threshold of the degenerate bands, 1meV
+            if (ABS(W(m)-W(n)) < degeneracy_threshold) cycle 
             G_xx= G_xx+ 2.d0*real(vx(m, n)*vx(n, m)/((W(m)-W(n))**3))
             G_xy= G_xy+ 2.d0*real(vx(m, n)*vy(n, m)/((W(m)-W(n))**3))
             G_yx= G_yx+ 2.d0*real(vy(m, n)*vx(n, m)/((W(m)-W(n))**3))
@@ -130,13 +140,23 @@ subroutine sigma_SOAHC_int
          enddo ! n
 
          !> consider the Fermi-distribution according to the brodening Earc_eta
-         !> vectorizing diffFermi to reduce the loop on ie
-         diffFermi=-Beta_fake*Exp(Beta_fake*(W(m)-energy))/(Exp(Beta_fake*(W(m)-energy))+1d0)**2
+         do ie=1, OmegaNum
+            mu = energy(ie)
 
-         sigma_xyytensor_ahc_mpi= sigma_xyytensor_ahc_mpi &
-            + (G_yy*real(vx(m,m))-G_xy*real(vy(m,m)))*diffFermi
-         sigma_yxxtensor_ahc_mpi= sigma_yxxtensor_ahc_mpi &
-            + (G_xx*real(vy(m,m))-G_yx*real(vx(m,m)))*diffFermi
+            !> the if...else... statements here is for robustness,
+            !> generally, the 'Beta_fake*(W(m)-mu)<50' condition will be satisfied.
+            if (Beta_fake*(W(m)-mu)<50) then
+               diffFermi=-Beta_fake*Exp(Beta_fake*(W(m)-mu))/(Exp(Beta_fake*(W(m)-mu))+1d0)**2
+            else
+               diffFermi=0.d0
+            endif
+            
+            sigma_xyytensor_ahc_mpi(ie)= sigma_xyytensor_ahc_mpi(ie) &
+               + (G_yy*real(vx(m,m))-G_xy*real(vy(m,m)))*diffFermi
+            sigma_yxxtensor_ahc_mpi(ie)= sigma_yxxtensor_ahc_mpi(ie) &
+               + (G_xx*real(vy(m,m))-G_yx*real(vx(m,m)))*diffFermi
+         enddo ! ie
+         
       enddo ! m
          
    enddo ! ik
@@ -153,17 +173,16 @@ subroutine sigma_SOAHC_int
 #endif
    !> the sigma_xyytensor_ahc contains an additional [energy]^-1 dimension, so besides e^3/hbar, we need to convert hartree to joule
    sigma_xyytensor_ahc= sigma_xyytensor_ahc/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume &
-      *Echarge**3/hbar/4.36d-18 
+      *Echarge**3/hbar/Hartree2J 
           
    sigma_yxxtensor_ahc= sigma_yxxtensor_ahc/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume &
-      *Echarge**3/hbar/4.36d-18
+      *Echarge**3/hbar/Hartree2J
           
    outfileindex= outfileindex+ 1
    if (cpuid.eq.0) then
       open(unit=outfileindex, file='sigma_SOAHC_int_3D.dat')
       write(outfileindex, '("#",a)')' Intrinsic 2nd anomalous hall conductivity, in unit of A.V^-2 for 3D cases.'
       write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
-      write(outfileindex, '("#",a)')' By default, the code treats the bands as double degenerate due to the PT-symmetry'
       write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyy', '\sigma_yxx'
       do ie=1, OmegaNum
          write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, sigma_xyytensor_ahc(ie), &
@@ -172,7 +191,7 @@ subroutine sigma_SOAHC_int
       close(outfileindex)
    endif
 
-   deallocate( W, Vmn_Ham, vx, vy, Hamk_bulk, Amat, UU, energy, diffFermi )
+   deallocate( W, Vmn_Ham, vx, vy, Hamk_bulk, Amat, UU, energy)
    deallocate( sigma_xyytensor_ahc, sigma_yxxtensor_ahc, sigma_xyytensor_ahc_mpi, sigma_yxxtensor_ahc_mpi )
 
    return

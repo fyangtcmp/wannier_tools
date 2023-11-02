@@ -16,6 +16,8 @@ subroutine sigma_NPHC_int
 
     real(dp),parameter :: mu_B=9.274d-24 !> Bohr magneton in SI unit
     real(dp),parameter :: Lande_g=2d0
+    real(dp), parameter :: degeneracy_threshold = 3.6749d-5 ! the threshold of judging the degenerate bands, 1meV
+    real(dp), parameter :: Hartree2J = 4.359748d-18
 
     integer :: ik, ikx, iky, ikz
     integer :: n, m, l, ie
@@ -156,9 +158,8 @@ subroutine sigma_NPHC_int
             Lambda_xxx= 0d0
 
             do m= 1, Num_wann
-                if (m==n) cycle
                 dEnm= W(n) - W(m)           
-                if (ABS(dEnm)<1.d-6) cycle
+                if (ABS(dEnm) < degeneracy_threshold) cycle
 
                 dEnm3= dEnm**3
                 G_xx= G_xx+ 2.d0*real(vx(n, m)*vx(m, n)/dEnm3)
@@ -174,13 +175,13 @@ subroutine sigma_NPHC_int
                 do l= 1, Num_wann
                     dEml= W(m)-W(l)
                     dEnl= W(n)-W(l)
-                    if (ABS(dEnl)>1.d-6) then
+                    if (ABS(dEnl) > degeneracy_threshold) then
                         Lambda_xyy= Lambda_xyy - real((vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)*sy(n, l)) /dEnm3/dEnl)
                         Lambda_yyy= Lambda_yyy - real((vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)*sy(n, l)) /dEnm3/dEnl)
                         Lambda_yxx= Lambda_yxx - real((vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)*sx(n, l)) /dEnm3/dEnl)
                         Lambda_xxx= Lambda_xxx - real((vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)*sx(n, l)) /dEnm3/dEnl)
                     endif
-                    if (ABS(dEml)>1.d-6) then
+                    if (ABS(dEml) > degeneracy_threshold) then
                         Lambda_xyy= Lambda_xyy - real((vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)*sy(m, l)) /dEnm3/dEml)
                         Lambda_yyy= Lambda_yyy - real((vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)*sy(m, l)) /dEnm3/dEml)
                         Lambda_yxx= Lambda_yxx - real((vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)*sx(m, l)) /dEnm3/dEml)
@@ -227,9 +228,9 @@ subroutine sigma_NPHC_int
     Chi_xyyy_tensor= Chi_xyyy_tensor_mpi
     Chi_yxxx_tensor= Chi_yxxx_tensor_mpi
 #endif
-    Chi_xyyy_tensor= Chi_xyyy_tensor *Echarge**3/hbar *(-Lande_g*mu_B) & !
+    Chi_xyyy_tensor= Chi_xyyy_tensor * Echarge**3 *(-Lande_g*mu_B) * 0.5d0 /Hartree2J/Hartree2J &
         /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-    Chi_yxxx_tensor= Chi_yxxx_tensor  & !*Echarge**2/hbar *(-Lande_g*mu_B)
+    Chi_yxxx_tensor= Chi_yxxx_tensor * Echarge**3 *(-Lande_g*mu_B) * 0.5d0 /Hartree2J/Hartree2J & 
         /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
 
     outfileindex= outfileindex+ 1
