@@ -14,10 +14,9 @@ subroutine sigma_NPHC_int
     use para
     implicit none
 
-    real(dp),parameter :: mu_B=9.274d-24 !> Bohr magneton in SI unit
-    real(dp),parameter :: Lande_g=2d0
-    real(dp), parameter :: degeneracy_threshold = 3.6749d-5 ! the threshold of judging the degenerate bands, 1meV
-    real(dp), parameter :: Hartree2J = 4.359748d-18
+    real(dp), parameter :: mu_B = 9.274d-24 !> Bohr magneton in SI unit
+    real(dp), parameter :: Lande_g = 2d0
+    real(dp), parameter :: degeneracy_threshold = 3.6749d-5 ! 1meV
 
     integer :: ik, ikx, iky, ikz
     integer :: n, m, l, ie
@@ -70,9 +69,6 @@ subroutine sigma_NPHC_int
     allocate( Chi_yxxx_tensor_mpi    (OmegaNum))
 
     Beta_fake=1d0/Eta_Arc
-    diffFermi=0d0
-    diffFermi2=0d0
-    etmp=0d0
 
     Hamk_bulk= 0d0
     Amat= 0d0
@@ -83,11 +79,6 @@ subroutine sigma_NPHC_int
     Chi_xyyy_tensor_mpi = 0d0
     Chi_yxxx_tensor     = 0d0
     Chi_yxxx_tensor_mpi = 0d0
-
-    dEnm= 0d0
-    dEnm3= 0d0
-    dEml= 0d0
-    dEnl= 0d0
 
     !> Fermi energy in Hatree energy, not eV
     do ie=1, OmegaNum
@@ -167,51 +158,52 @@ subroutine sigma_NPHC_int
                 G_yx= G_yx+ 2.d0*real(vy(n, m)*vx(m, n)/dEnm3)
                 G_yy= G_yy+ 2.d0*real(vy(n, m)*vy(m, n)/dEnm3) 
 
-                Lambda_xyy= Lambda_xyy + 3.d0*real(vx(n, m)*vy(m, n)*(sy(n, n)-sy(m, m))/dEnm3/dEnm)
-                Lambda_yyy= Lambda_yyy + 3.d0*real(vy(n, m)*vy(m, n)*(sy(n, n)-sy(m, m))/dEnm3/dEnm)
-                Lambda_yxx= Lambda_yxx + 3.d0*real(vy(n, m)*vx(m, n)*(sx(n, n)-sx(m, m))/dEnm3/dEnm)
-                Lambda_xxx= Lambda_xxx + 3.d0*real(vx(n, m)*vx(m, n)*(sx(n, n)-sx(m, m))/dEnm3/dEnm)
+                Lambda_xyy= Lambda_xyy + 6.d0* real(vx(n, m)*vy(m, n)*(sy(n, n)-sy(m, m))/dEnm3/dEnm)
+                Lambda_yyy= Lambda_yyy + 6.d0* real(vy(n, m)*vy(m, n)*(sy(n, n)-sy(m, m))/dEnm3/dEnm)
+                Lambda_yxx= Lambda_yxx + 6.d0* real(vy(n, m)*vx(m, n)*(sx(n, n)-sx(m, m))/dEnm3/dEnm)
+                Lambda_xxx= Lambda_xxx + 6.d0* real(vx(n, m)*vx(m, n)*(sx(n, n)-sx(m, m))/dEnm3/dEnm)
                 
                 do l= 1, Num_wann
-                    dEml= W(m)-W(l)
                     dEnl= W(n)-W(l)
+                    dEml= W(m)-W(l)                    
                     if (ABS(dEnl) > degeneracy_threshold) then
-                        Lambda_xyy= Lambda_xyy - real((vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)*sy(n, l)) /dEnm3/dEnl)
-                        Lambda_yyy= Lambda_yyy - real((vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)*sy(n, l)) /dEnm3/dEnl)
-                        Lambda_yxx= Lambda_yxx - real((vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)*sx(n, l)) /dEnm3/dEnl)
-                        Lambda_xxx= Lambda_xxx - real((vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)*sx(n, l)) /dEnm3/dEnl)
+                        Lambda_xyy= Lambda_xyy - 2.d0* real((vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)*sy(n, l)) /dEnm3/dEnl)
+                        Lambda_yyy= Lambda_yyy - 2.d0* real((vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)*sy(n, l)) /dEnm3/dEnl)
+                        Lambda_yxx= Lambda_yxx - 2.d0* real((vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)*sx(n, l)) /dEnm3/dEnl)
+                        Lambda_xxx= Lambda_xxx - 2.d0* real((vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)*sx(n, l)) /dEnm3/dEnl)
                     endif
                     if (ABS(dEml) > degeneracy_threshold) then
-                        Lambda_xyy= Lambda_xyy - real((vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)*sy(m, l)) /dEnm3/dEml)
-                        Lambda_yyy= Lambda_yyy - real((vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)*sy(m, l)) /dEnm3/dEml)
-                        Lambda_yxx= Lambda_yxx - real((vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)*sx(m, l)) /dEnm3/dEml)
-                        Lambda_xxx= Lambda_xxx - real((vx(l, n)*vx(n, m)+vx(l, n)*vx(n, m)*sx(m, l)) /dEnm3/dEml)
+                        Lambda_xyy= Lambda_xyy - 2.d0* real((vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)*sy(m, l)) /dEnm3/dEml)
+                        Lambda_yyy= Lambda_yyy - 2.d0* real((vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)*sy(m, l)) /dEnm3/dEml)
+                        Lambda_yxx= Lambda_yxx - 2.d0* real((vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)*sx(m, l)) /dEnm3/dEml)
+                        Lambda_xxx= Lambda_xxx - 2.d0* real((vx(l, n)*vx(n, m)+vx(l, n)*vx(n, m)*sx(m, l)) /dEnm3/dEml)
                     endif
                 enddo ! l
 
             enddo ! m
 
-            Lambda_xyy = Lambda_xyy * 2.d0
-            Lambda_yyy = Lambda_yyy * 2.d0
-            Lambda_yxx = Lambda_yxx * 2.d0
-            Lambda_xxx = Lambda_xxx * 2.d0
-
             !> consider the Fermi-distribution according to the brodening Earc_eta
             do ie=1, OmegaNum
                 mu = energy(ie)
-                etmp=Exp(Beta_fake*(W(n)-mu))
-                diffFermi = -Beta_fake   *etmp/(etmp+1d0)**2
-                diffFermi2=  Beta_fake**2*2d0*Exp(2d0*Beta_fake*(W(n)-mu))/(etmp+1d0)**3 + Beta_fake*diffFermi
-                
+                if (Beta_fake*(W(n)-mu)<50) then
+                    etmp=Exp(Beta_fake*(W(n)-mu))
+                    diffFermi = -Beta_fake    * etmp           /(etmp+1d0)**2
+                    diffFermi2= -Beta_fake**2 *(etmp - etmp**2)/(etmp+1d0)**3
+                else
+                    diffFermi = 0.d0
+                    diffFermi2= 0.d0
+                endif
+
+                ! if ((diffFermi .ne. diffFermi) .or. (diffFermi2 .ne. diffFermi2)) stop
+
                 Chi_xyyy = 0d0
                 Chi_yxxx = 0d0
 
-                Chi_xyyy = Chi_xyyy + real( vx(n,n)*Lambda_yyy - vy(n,n)*Lambda_xyy)          * diffFermi
-                Chi_xyyy = Chi_xyyy + real((vx(n,n)*G_yy       - vy(n,n)*G_xy      )*sy(n,n)) * diffFermi2
-                Chi_yxxx = Chi_yxxx + real( vy(n,n)*Lambda_xxx - vx(n,n)*Lambda_yxx)          * diffFermi
-                Chi_yxxx = Chi_yxxx + real((vy(n,n)*G_xx       - vx(n,n)*G_yx      )*sx(n,n)) * diffFermi2
-
-                
+                ! Chi_xyyy = Chi_xyyy + real( vx(n,n)*Lambda_yyy - vy(n,n)*Lambda_xyy)          * diffFermi
+                Chi_xyyy = Chi_xyyy - real((vx(n,n)*G_yy       - vy(n,n)*G_xy      )*sy(n,n)) * diffFermi2
+                ! Chi_yxxx = Chi_yxxx + real( vy(n,n)*Lambda_xxx - vx(n,n)*Lambda_yxx)          * diffFermi
+                Chi_yxxx = Chi_yxxx - real((vy(n,n)*G_xx       - vx(n,n)*G_yx      )*sx(n,n)) * diffFermi2
+               
                 Chi_xyyy_tensor_mpi(ie)= Chi_xyyy_tensor_mpi(ie) + Chi_xyyy
                 Chi_yxxx_tensor_mpi(ie)= Chi_yxxx_tensor_mpi(ie) + Chi_yxxx
             enddo ! ie
@@ -228,15 +220,15 @@ subroutine sigma_NPHC_int
     Chi_xyyy_tensor= Chi_xyyy_tensor_mpi
     Chi_yxxx_tensor= Chi_yxxx_tensor_mpi
 #endif
-    Chi_xyyy_tensor= Chi_xyyy_tensor * Echarge**3 *(-Lande_g*mu_B) * 0.5d0 /Hartree2J/Hartree2J &
+    Chi_xyyy_tensor= Chi_xyyy_tensor * Echarge**3/hbar *(-Lande_g*mu_B) * 0.5d0 /Hartree2J/Hartree2J &
         /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-    Chi_yxxx_tensor= Chi_yxxx_tensor * Echarge**3 *(-Lande_g*mu_B) * 0.5d0 /Hartree2J/Hartree2J & 
+    Chi_yxxx_tensor= Chi_yxxx_tensor * Echarge**3/hbar *(-Lande_g*mu_B) * 0.5d0 /Hartree2J/Hartree2J & 
         /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
 
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
        open(unit=outfileindex, file= 'sigma_NPHC_int.dat')
-       write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of m*A*V^-2*T^-1'
+       write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
        write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy', '\sigma_yxxx'
        do ie=1, OmegaNum
           write(outfileindex, '(200E17.8E3)') &

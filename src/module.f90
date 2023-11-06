@@ -632,12 +632,13 @@
 
      !> some parameters related to atomic units
      !> https://en.wikipedia.org/wiki/Hartree_atomic_units 2020
-     !> WannierTools codes use Hatree atomic units
+     !> WannierTools codes use Hartree atomic units
      real(dp),parameter :: Time_atomic=2.4188843265857E-17 ! atomic unit of time \hbar/E_Hatree
      real(dp),parameter :: Bohr_radius=5.29177210903E-11 ! Bohr radius in meters
      real(dp),parameter :: Angstrom2atomic=1d0/0.529177210903d0  ! Angstrom to atomic length unit (Bohr radius)
      real(dp),parameter :: Ang2Bohr=1d0/0.529177210903d0  ! Angstrom to atomic length unit (Bohr radius)
      real(dp),parameter :: eV2Hartree= 1d0/27.211385d0 ! electron Voltage to Hartree unit
+     real(dp),parameter :: Hartree2J = 4.359748d-18
      real(dp),parameter :: Echarge= 1.602176634E-19    ! electron charge in SI unit
      real(dp),parameter :: hbar= 1.054571817E-34    ! electron charge in SI unit
      real(dp),parameter :: epsilon0= 8.85418781762E-12    ! dielectric constant in SI unit
