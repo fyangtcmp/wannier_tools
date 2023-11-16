@@ -638,7 +638,6 @@
      real(dp),parameter :: Angstrom2atomic=1d0/0.529177210903d0  ! Angstrom to atomic length unit (Bohr radius)
      real(dp),parameter :: Ang2Bohr=1d0/0.529177210903d0  ! Angstrom to atomic length unit (Bohr radius)
      real(dp),parameter :: eV2Hartree= 1d0/27.211385d0 ! electron Voltage to Hartree unit
-     real(dp),parameter :: Hartree2J = 4.359748d-18
      real(dp),parameter :: Echarge= 1.602176634E-19    ! electron charge in SI unit
      real(dp),parameter :: hbar= 1.054571817E-34    ! electron charge in SI unit
      real(dp),parameter :: epsilon0= 8.85418781762E-12    ! dielectric constant in SI unit

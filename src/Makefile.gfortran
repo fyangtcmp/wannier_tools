@@ -8,7 +8,8 @@ obj =  module.o sparse.o wt_aux.o math_lib.o symmetry.o readHmnR.o inverse.o pro
   		 landau_level_sparse.o landau_level.o lanczos_sparse.o \
 		 berry.o wanniercenter_adaptive.o \
   		 effective_mass.o findnodes.o \
-		 sigma_OHE.o sigma.o Boltz_transport_anomalous.o sigma_SOAHC_int.o \
+		 sigma_OHE.o sigma.o magnetic_moments.o nonlinear_transport.o \
+                 Boltz_transport_anomalous.o sigma_NPHC_int.o \
 	main.o
 
 # compiler

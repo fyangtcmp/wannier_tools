@@ -497,6 +497,7 @@ subroutine sigma_ahc_vary_ChemicalPotential(NumOfmu, mulist, NumberofEta, eta_ar
 
      use wmpi
      use para
+     use magnetic_moments
      implicit none
     
      integer :: ik, ikx, iky, ikz, ieta
@@ -572,23 +573,7 @@ subroutine sigma_ahc_vary_ChemicalPotential(NumOfmu, mulist, NumberofEta, eta_ar
      eta_array= eta_array*Eta_Arc
 
      nwann= Num_wann/2
-     !> spin operator matrix
-     !> this part is package dependent. 
-    !if (index( Package, 'VASP')/=0.or. index( Package, 'Wien2k')/=0 &
-    !   .or. index( Package, 'Abinit')/=0.or. index( Package, 'openmx')/=0) then
-        do j=1, nwann
-           pauli_matrices(j, nwann+j, 1)=1.0d0
-           pauli_matrices(j+nwann, j, 1)=1.0d0
-           pauli_matrices(j, nwann+j, 2)=-zi
-           pauli_matrices(j+nwann, j, 2)=zi
-           pauli_matrices(j, j, 3)= 1d0
-           pauli_matrices(j+nwann, j+nwann, 3)=-1d0
-        enddo
-    !else
-    !   if (cpuid.eq.0) write(stdout, *)'Error: please report your software and wannier90.wout to me'
-    !   if (cpuid.eq.0) write(stdout, *)'wuquansheng@gmail.com'
-    !   stop 'Error: please report your software and wannier90.wout to wuquansheng@gmail.com'
-    !endif
+     call spin_magnetic_moments(pauli_matrices)
 
    
      !> energy range (chemical potential range)
