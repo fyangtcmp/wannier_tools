@@ -21,7 +21,6 @@ subroutine sigma_NPHC_int
     integer :: ie, ieta
     integer :: ierr, knv3
     real(dp) :: k(3)
-    real(dp) :: Bvector(3)
 
     character*40 :: ahcfilename, etaname
     real(dp), allocatable :: Eta_array(:)
@@ -69,18 +68,6 @@ subroutine sigma_NPHC_int
             energy= OmegaMin
         endif
     enddo ! ie
-
-    !> difference on magnetic field
-    if (cpuid .eq. 0) then
-        if ((Bx==0d0) .or. (By==0d0)) then
-            write(stdout, '("We did not find Bx or By in wt.in, so we use the default value Bx=By=Bz=2 Tesla")')
-            Bvector = 2d0
-        else
-            Bvector(1) = Bx
-            Bvector(2) = By
-            Bvector(3) = Bz
-        endif
-    endif
 
     knv3= Nk1*Nk2*Nk3
 
