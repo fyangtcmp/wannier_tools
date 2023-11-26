@@ -1,5 +1,5 @@
 module nonlinear_transport
-    use para, only: dp, eV2Hartree, Echarge, hbar, Num_wann, OmegaNum
+    use para, only: dp, eV2Hartree, Echarge, mu_B, Hartree2J, hbar, Num_wann, OmegaNum, zi
     implicit none
 
     !> magnetic moments in nonlinear planar Hall
@@ -21,55 +21,53 @@ module nonlinear_transport
 
     !> temperature lists:           10K        20K       70K      100K      200K      300K
     real(dp):: Eta_array_all(6) = (/0.00086d0, 0.0017d0, 0.006d0, 0.0086d0, 0.0172d0, 0.0259d0/)*eV2Hartree
-
-    real(dp), parameter :: Hartree2J = 4.359748d-18
-    real(dp), parameter :: SOAHC_unit_factor = Echarge**3/hbar/Hartree2J
-    ! Echarge**3/hbar/Hartree2J/Hartree2J !> NPHC_unit_factor, not used
+    
+    real(dp), parameter :: SOAHC_unit_factor =   Echarge**3/hbar/Hartree2J
+    real(dp), parameter :: INPHC_unit_factor = - Echarge**3/hbar/Hartree2J * mu_B
 
 contains
-    subroutine velocity_latticegauge_simple(k, UU, vx, vy)
-        use para, only: irvec, crvec, HmnR, pi2zi, zi, ndegen, Nrpts
+    subroutine velocity_latticegauge_simple(k, UU, velocities) !> dH_dk, without 1/hbar
+        use para, only: irvec, crvec, HmnR, pi2zi, ndegen, Nrpts
         implicit none
 
         real(dp),    intent(in)  :: k(3)
         complex(dp), intent(in)  :: UU(Num_wann, Num_wann)
-        complex(dp), intent(out) :: vx(Num_wann, Num_wann), vy(Num_wann, Num_wann)
+        complex(dp), intent(out) :: velocities(Num_wann, Num_wann, 3)
 
         real(dp):: kdotr
         integer :: iR
         complex(dp), allocatable :: Amat(:, :), UU_dag(:,:)
         allocate( Amat(Num_wann, Num_wann), UU_dag(Num_wann, Num_wann))
 
-        vx= 0d0; vy= 0d0
+        velocities= 0d0
         do iR= 1, Nrpts
             kdotr= k(1)*irvec(1,iR) + k(2)*irvec(2,iR) + k(3)*irvec(3,iR)
-            vx= vx+ zi*crvec(1, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
-            vy= vy+ zi*crvec(2, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
-            ! vz= vz+ zi*crvec(3, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+            velocities(:,:,1)= velocities(:,:,1) + zi*crvec(1, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+            velocities(:,:,2)= velocities(:,:,2) + zi*crvec(2, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+            velocities(:,:,3)= velocities(:,:,3) + zi*crvec(3, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
         enddo ! iR
 
-        Amat= 0d0
         UU_dag= conjg(transpose(UU))
         !> unitility rotate velocity
-        call mat_mul(Num_wann, vx, UU, Amat)
-        call mat_mul(Num_wann, UU_dag, Amat, vx)
-        call mat_mul(Num_wann, vy, UU, Amat)
-        call mat_mul(Num_wann, UU_dag, Amat, vy)
-        ! call mat_mul(Num_wann, vz, UU, Amat)
-        ! call mat_mul(Num_wann, UU_dag, Amat, vz)
+        call mat_mul(Num_wann, velocities(:,:,1), UU, Amat)
+        call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,1))
+        call mat_mul(Num_wann, velocities(:,:,2), UU, Amat)
+        call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,2))
+        call mat_mul(Num_wann, velocities(:,:,3), UU, Amat)
+        call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,3))
 
         deallocate(Amat, UU_dag)
         return
     end subroutine velocity_latticegauge_simple
 
     
-    subroutine Lambda_abc_sum(energy, W, vx, vy, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
+    subroutine Lambda_abc_sum(energy, W, velocities, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
         use para, only:  OmegaMin, OmegaMax
         implicit none
 
         real(dp), intent(in)  :: energy(OmegaNum)
         real(dp), intent(in)  :: W(Num_wann)
-        complex(dp),intent(in):: vx(Num_wann, Num_wann), vy(Num_wann, Num_wann)
+        complex(dp),intent(in):: velocities(Num_wann, Num_wann, 3)
         integer , intent(in)  :: NumberofEta
         real(dp), intent(in)  :: Eta_array(NumberofEta)
         real(dp), intent(out) :: sigma_xyy_k(OmegaNum, NumberofEta)
@@ -79,6 +77,11 @@ contains
 
         real(dp) :: mu, diffFermi
         real(dp) :: G_xy, G_yx, G_xx, G_yy
+        complex(dp), allocatable :: vx(:, :), vy(:, :)
+
+        allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann) )
+        vx = velocities(:,:,1)
+        vy = velocities(:,:,2)
 
         sigma_xyy_k        = 0d0
         sigma_yxx_k        = 0d0
@@ -121,8 +124,11 @@ contains
                 enddo ! ie
             enddo ! ieta
         enddo ! m
+
+        deallocate(vx, vy)
         return
     end subroutine Lambda_abc_sum
+
 
     subroutine sigma_SOAHC_int_single_k(k, energy, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
 
@@ -141,12 +147,12 @@ contains
         complex(dp), allocatable :: UU(:, :)
     
         !> velocities
-        complex(dp), allocatable :: vx(:, :), vy(:, :)
+        complex(dp), allocatable :: velocities(:,:,:)
     
         allocate( W(Num_wann))
         allocate( Hamk_bulk(Num_wann, Num_wann))
         allocate( UU(Num_wann, Num_wann))
-        allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
+        allocate( velocities(Num_wann, Num_wann, 3))
     
         Hamk_bulk= 0d0
         UU= 0d0
@@ -158,13 +164,14 @@ contains
         UU=Hamk_bulk
         call eigensystem_c( 'V', 'U', Num_wann, UU, W)
     
-        call velocity_latticegauge_simple(k, UU, vx, vy)
+        call velocity_latticegauge_simple(k, UU, velocities)
     
-        call Lambda_abc_sum(energy, W, vx, vy, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
+        call Lambda_abc_sum(energy, W, velocities, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
     
-        deallocate( W, Hamk_bulk, UU, vx, vy)
+        deallocate( W, Hamk_bulk, UU, velocities)
         return
     end subroutine sigma_SOAHC_int_single_k
+
 end module
 
 !> Calculate the intrinsic second order anomalous hall conductivity, the xyy and yxx elements
@@ -174,7 +181,7 @@ end module
 !> ref1 : 10.1103/PhysRevLett.127.277201
 !> ref2 : 10.1103/PhysRevLett.127.277202
 !
-!> Original developed by Jianzhou Zhao
+!> Original developed by Huiying Liu
 !> 2022/07/15 Fan Yang, correct the units
 !> 2023/10/30 Fan Yang, update to wannier tools 2.7.0
 !> 2023/11/06 Fan Yang, adaptive k-meshes methods to accelerate speed

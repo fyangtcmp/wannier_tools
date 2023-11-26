@@ -642,6 +642,8 @@
      real(dp),parameter :: hbar= 1.054571817E-34    ! electron charge in SI unit
      real(dp),parameter :: epsilon0= 8.85418781762E-12    ! dielectric constant in SI unit
      real(dp),parameter :: Magneticfluxdensity_atomic=  2.35051756758*1E5    ! magnetic field strength in SI unit
+     real(dp),parameter :: mu_B= 2.1271d-06 !> Bohr magneton, Hartree/Tesla
+     real(dp),parameter :: Hartree2J= 4.359748d-18
 
      real(dp),parameter :: Pi= 3.14159265358979d0  ! circumference ratio pi  
      real(dp),parameter :: twopi=2d0*Pi    ! two times of Pi
