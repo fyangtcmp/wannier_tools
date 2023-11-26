@@ -1,5 +1,5 @@
 module magnetic_moments
-    use para, only: dp, zi, mu_B, eV2Hartree, Num_wann
+    use para, only: dp, zi, mu_B, eV2Hartree, Num_wann, Echarge, hbar, Bohr_radius
     use nonlinear_transport, only: band_degeneracy_threshold
     implicit none
 
@@ -8,10 +8,10 @@ module magnetic_moments
     real(dp), parameter :: Lande_g_L = 1d0
 
 contains
-    subroutine spin_magnetic_moments(M_S)
+    subroutine spin_magnetic_moments(M_S)  !> without units
         !> extend the pauli matrices to the wannier basis, without any units
 
-        use para, only: Package, Num_wann, zi
+        use para, only: Package
         implicit none
 
         integer :: j, nwann
@@ -49,7 +49,7 @@ contains
         return
     end subroutine spin_magnetic_moments
 
-    subroutine orbital_magnetic_moments(W, velocities, M_L) !> without units
+    subroutine orbital_magnetic_moments(W, velocities, M_L) !> without units, so we divide the M_L(Hartree/T) by mu_B(Hartree/T)
         !> SciPost Phys. 14, 118 (2023), Eq 24b
 
         implicit none
@@ -77,7 +77,7 @@ contains
             enddo !n
         enddo !l
         
-        M_L = M_L * 4/zi * eV2Hartree / mu_B
+        M_L = M_L * 4/zi * Echarge / hbar * Bohr_radius**2 /mu_B
         return
     end subroutine orbital_magnetic_moments
 end module

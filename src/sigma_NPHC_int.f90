@@ -60,6 +60,15 @@ subroutine sigma_NPHC_int
     Chi_yxxx_tensor     = 0d0
     Chi_yxxx_tensor_mpi = 0d0
 
+    if (cpuid .eq. 0) then
+        if (include_m_spin) then
+            write(stdout, '("You have considered the spin    magnetic moments.")')
+        endif
+        if (include_m_orb) then
+            write(stdout, '("You have considered the orbital magnetic moments.")')
+        endif
+    endif
+
     !> Fermi energy in Hatree energy, not eV
     do ie=1, OmegaNum
         if (OmegaNum>1) then
