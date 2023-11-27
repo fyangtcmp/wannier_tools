@@ -8,8 +8,9 @@ module magnetic_moments
     real(dp), parameter :: Lande_g_L = 1d0
 
 contains
-    subroutine spin_magnetic_moments(M_S)  !> without units
-        !> extend the pauli matrices to the wannier basis, without any units
+    subroutine spin_magnetic_moments(M_S)
+        !> extend the 2x2 pauli matrices to the wannier basis, without any units
+        !> It is operators, so you need to do <psi| M_S |psi> yourself
 
         use para, only: Package
         implicit none
@@ -51,6 +52,7 @@ contains
 
     subroutine orbital_magnetic_moments(W, velocities, M_L) !> without units, so we divide the M_L(Hartree/T) by mu_B(Hartree/T)
         !> SciPost Phys. 14, 118 (2023), Eq 24b
+        !> It is NOT operators, which means M_tot = <psi| M_S |psi> + M_L
 
         implicit none
 

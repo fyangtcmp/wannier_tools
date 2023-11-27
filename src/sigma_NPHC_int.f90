@@ -7,13 +7,15 @@ subroutine sigma_NPHC_int
     !
     !> 2023/10/31 Fan Yang
     !
-    !> The Lande g-factor for spin degree is fixed to 2
-    !> The input hr.dat must be from wannier90 v2.0 or newer versions
 
     use wmpi
     use para
     use nonlinear_transport
     implicit none
+
+    !> magnetic moments in nonlinear planar Hall
+    logical               :: include_m_spin = .true.
+    logical               :: include_m_orb  = .false.
 
     integer :: NumberofEta              !> NumT
 
@@ -97,7 +99,7 @@ subroutine sigma_NPHC_int
             + K3D_vec2_cube*(iky-1)/dble(Nk2)  &
             + K3D_vec3_cube*(ikz-1)/dble(Nk3)
 
-        call sigma_NPHC_int_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
+        call sigma_INPHC_single_k(include_m_spin, include_m_orb, k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
 
         Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi+ Chi_xyyy_k
         Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi+ Chi_yxxx_k
@@ -120,7 +122,16 @@ subroutine sigma_NPHC_int
     if (cpuid.eq.0) then
         do ieta=1, NumberofEta
             write(etaname, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
-            write(ahcfilename, '(7a)')'sigma_NPHC_int_eta', trim(adjustl(etaname)), 'meV.dat'
+            if ((include_m_spin) .and. (include_m_orb)) then
+                write(ahcfilename, '(7a)')'sigma_INPHC_LS_eta', trim(adjustl(etaname)), 'meV.dat'
+            else if (include_m_spin) then
+                write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(etaname)), 'meV.dat'
+            else if (include_m_orb ) then
+                write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(etaname)), 'meV.dat'
+            else
+                write(ahcfilename, '(7a)')'sigma_INPHC_eta', trim(adjustl(etaname)), 'meV.dat'
+            endif
+
             open(unit=outfileindex, file=ahcfilename)
             write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
             write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
@@ -138,14 +149,18 @@ subroutine sigma_NPHC_int
 
     return
 
-end subroutine sigma_NPHC_int
+end subroutine
 
-subroutine sigma_NPHC_int_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
 
-    use nonlinear_transport
+subroutine sigma_INPHC_single_k(include_m_spin, include_m_orb, k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
+
+    use nonlinear_transport, only: velocity_latticegauge_simple
     use magnetic_moments
     use para
     implicit none
+
+    logical, intent(in)   :: include_m_spin
+    logical, intent(in)   :: include_m_orb 
 
     real(dp), intent(in)  :: k(3)
     real(dp), intent(in)  :: energy(OmegaNum)
@@ -156,7 +171,6 @@ subroutine sigma_NPHC_int_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k
 
     complex(dp), allocatable :: M_S(:, :, :) !> spin magnetic moments
     complex(dp), allocatable :: M_L(:, :, :) !> orbital magnetic moments
-    complex(dp), allocatable :: M_tot(:, :, :)
 
     integer :: n, m, l, ie, ieta
     
@@ -213,25 +227,27 @@ subroutine sigma_NPHC_int_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k
     !> magnetic operators 
     allocate( M_S(Num_wann, Num_wann,3) )
     allocate( M_L(Num_wann, Num_wann,3) )
-    allocate( M_tot(Num_wann, Num_wann,3) )
 
     M_S = 0d0
     M_L = 0d0
-    M_tot = 0d0
     if (include_m_spin) then
         call spin_magnetic_moments(M_S)
+
+        call mat_mul(Num_wann, M_S(:,:,1), UU, Amat)
+        call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,1)) 
+        call mat_mul(Num_wann, M_S(:,:,2), UU, Amat) 
+        call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,2))
+        ! call mat_mul(Num_wann, M_S(:,:,3), UU, Amat)
+        ! call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,3))
     endif
     if (include_m_orb) then
         call orbital_magnetic_moments(W, velocities, M_L)
     endif
-    M_tot = 0.5d0 * Lande_g_S * M_S + Lande_g_L * M_L
 
-    call mat_mul(Num_wann, M_tot(:,:,1), UU, Amat)
-    call mat_mul(Num_wann, UU_dag, Amat, sx) 
-    call mat_mul(Num_wann, M_tot(:,:,2), UU, Amat) 
-    call mat_mul(Num_wann, UU_dag, Amat, sy)
-    ! call mat_mul(Num_wann, M_S(:,:,3), UU, Amat)
-    ! call mat_mul(Num_wann, UU_dag, Amat, sz)
+    sx = -0.5d0 * Lande_g_S * M_S(:,:,1) + Lande_g_L * M_L(:,:,1)
+    sy = -0.5d0 * Lande_g_S * M_S(:,:,2) + Lande_g_L * M_L(:,:,2)
+    sz = -0.5d0 * Lande_g_S * M_S(:,:,3) + Lande_g_L * M_L(:,:,3) 
+
 
     !===========================================================================
     !> k + dk_x
@@ -288,36 +304,36 @@ subroutine sigma_NPHC_int_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k
             if (ABS(dEnm) < band_degeneracy_threshold) cycle
 
             dEnm3= dEnm**3
-            G_xx= G_xx+ 2.d0*real(vx(n, m)*vx(m, n)/dEnm3)
-            G_xy= G_xy+ 2.d0*real(vx(n, m)*vy(m, n)/dEnm3)
-            G_yx= G_yx+ 2.d0*real(vy(n, m)*vx(m, n)/dEnm3)
-            G_yy= G_yy+ 2.d0*real(vy(n, m)*vy(m, n)/dEnm3)
+            G_xx= G_xx+ 2.d0*real( vx(n, m)*vx(m, n) )/dEnm3
+            G_xy= G_xy+ 2.d0*real( vx(n, m)*vy(m, n) )/dEnm3
+            G_yx= G_yx+ 2.d0*real( vy(n, m)*vx(m, n) )/dEnm3
+            G_yy= G_yy+ 2.d0*real( vy(n, m)*vy(m, n) )/dEnm3
 
-            G_yy_dx= G_yy_dx + 2.d0*real(vy_dx(n, m)*vy_dx(m, n)/ (W_dx(n) - W_dx(m))**3 )
-            G_yx_dx= G_yx_dx + 2.d0*real(vy_dx(n, m)*vx_dx(m, n)/ (W_dx(n) - W_dx(m))**3 )
+            G_yy_dx= G_yy_dx + 2.d0*real( vy_dx(n, m)*vy_dx(m, n) )/(W_dx(n) - W_dx(m))**3
+            G_yx_dx= G_yx_dx + 2.d0*real( vy_dx(n, m)*vx_dx(m, n) )/(W_dx(n) - W_dx(m))**3
             
-            G_xy_dy= G_xy_dy + 2.d0*real(vx_dy(n, m)*vy_dy(m, n)/ (W_dy(n) - W_dy(m))**3 )
-            G_xx_dy= G_xx_dy + 2.d0*real(vx_dy(n, m)*vx_dy(m, n)/ (W_dy(n) - W_dy(m))**3 ) 
+            G_xy_dy= G_xy_dy + 2.d0*real( vx_dy(n, m)*vy_dy(m, n) )/(W_dy(n) - W_dy(m))**3
+            G_xx_dy= G_xx_dy + 2.d0*real( vx_dy(n, m)*vx_dy(m, n) )/(W_dy(n) - W_dy(m))**3
 
-            Lambda_xyy= Lambda_xyy + 6.d0* real(vx(n, m)*vy(m, n)*(sy(n, n)-sy(m, m))/dEnm3/dEnm)
-            Lambda_yyy= Lambda_yyy + 6.d0* real(vy(n, m)*vy(m, n)*(sy(n, n)-sy(m, m))/dEnm3/dEnm)
-            Lambda_yxx= Lambda_yxx + 6.d0* real(vy(n, m)*vx(m, n)*(sx(n, n)-sx(m, m))/dEnm3/dEnm)
-            Lambda_xxx= Lambda_xxx + 6.d0* real(vx(n, m)*vx(m, n)*(sx(n, n)-sx(m, m))/dEnm3/dEnm)
+            Lambda_xyy= Lambda_xyy + 6.d0* real( vx(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
+            Lambda_yyy= Lambda_yyy + 6.d0* real( vy(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
+            Lambda_yxx= Lambda_yxx + 6.d0* real( vy(n, m)*vx(m, n)*(sx(n, n)-sx(m, m)) )/dEnm3/dEnm
+            Lambda_xxx= Lambda_xxx + 6.d0* real( vx(n, m)*vx(m, n)*(sx(n, n)-sx(m, m)) )/dEnm3/dEnm
             
             do l= 1, Num_wann
                 dEnl= W(n)-W(l)
                 dEml= W(m)-W(l)                    
                 if (ABS(dEnl) > band_degeneracy_threshold) then
-                    Lambda_xyy= Lambda_xyy - 2.d0* real((vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)*sy(n, l)) /dEnm3/dEnl)
-                    Lambda_yyy= Lambda_yyy - 2.d0* real((vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)*sy(n, l)) /dEnm3/dEnl)
-                    Lambda_yxx= Lambda_yxx - 2.d0* real((vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)*sx(n, l)) /dEnm3/dEnl)
-                    Lambda_xxx= Lambda_xxx - 2.d0* real((vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)*sx(n, l)) /dEnm3/dEnl)
+                    Lambda_xyy= Lambda_xyy - 2.d0* real( (vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)) *sy(n, l)) /dEnm3/dEnl
+                    Lambda_yyy= Lambda_yyy - 2.d0* real( (vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)) *sy(n, l)) /dEnm3/dEnl
+                    Lambda_yxx= Lambda_yxx - 2.d0* real( (vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)) *sx(n, l)) /dEnm3/dEnl
+                    Lambda_xxx= Lambda_xxx - 2.d0* real( (vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)) *sx(n, l)) /dEnm3/dEnl
                 endif
                 if (ABS(dEml) > band_degeneracy_threshold) then
-                    Lambda_xyy= Lambda_xyy - 2.d0* real((vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)*sy(m, l)) /dEnm3/dEml)
-                    Lambda_yyy= Lambda_yyy - 2.d0* real((vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)*sy(m, l)) /dEnm3/dEml)
-                    Lambda_yxx= Lambda_yxx - 2.d0* real((vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)*sx(m, l)) /dEnm3/dEml)
-                    Lambda_xxx= Lambda_xxx - 2.d0* real((vx(l, n)*vx(n, m)+vx(l, n)*vx(n, m)*sx(m, l)) /dEnm3/dEml)
+                    Lambda_xyy= Lambda_xyy - 2.d0* real( (vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)) *sy(m, l)) /dEnm3/dEml
+                    Lambda_yyy= Lambda_yyy - 2.d0* real( (vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)) *sy(m, l)) /dEnm3/dEml
+                    Lambda_yxx= Lambda_yxx - 2.d0* real( (vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)) *sx(m, l)) /dEnm3/dEml
+                    Lambda_xxx= Lambda_xxx - 2.d0* real( (vx(l, n)*vx(n, m)+vx(l, n)*vx(n, m)) *sx(m, l)) /dEnm3/dEml
                 endif
             enddo ! l
 
@@ -345,8 +361,8 @@ subroutine sigma_NPHC_int_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k
     deallocate(W, vx, vy, Hamk_bulk, Amat, UU, UU_dag, velocities)
     deallocate(W_dx, W_dy, vx_dx, vx_dy, vy_dx, vy_dy)
     deallocate(sx, sy, sz)
-    deallocate(M_S, M_L, M_tot)
+    deallocate(M_S, M_L)
     return
 
-end subroutine sigma_NPHC_int_single_k
+end subroutine sigma_INPHC_single_k
 

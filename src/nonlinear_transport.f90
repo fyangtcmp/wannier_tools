@@ -2,10 +2,6 @@ module nonlinear_transport
     use para, only: dp, eV2Hartree, Echarge, mu_B, Hartree2J, hbar, Num_wann, OmegaNum, zi
     implicit none
 
-    !> magnetic moments in nonlinear planar Hall
-    logical             :: include_m_spin = .true.
-    logical             :: include_m_orb  = .false.
-
     !> adaptive k-meshes method
     logical :: use_adaptive_method = .false.
     real(dp):: adaptive_threshold  = 1e-10
@@ -22,8 +18,8 @@ module nonlinear_transport
     !> temperature lists:           10K        20K       70K      100K      200K      300K
     real(dp):: Eta_array_all(6) = (/0.00086d0, 0.0017d0, 0.006d0, 0.0086d0, 0.0172d0, 0.0259d0/)*eV2Hartree
     
-    real(dp), parameter :: SOAHC_unit_factor =   Echarge**3/hbar/Hartree2J
-    real(dp), parameter :: INPHC_unit_factor = - Echarge**3/hbar/Hartree2J * mu_B
+    real(dp), parameter :: SOAHC_unit_factor = Echarge**3/hbar/Hartree2J
+    real(dp), parameter :: INPHC_unit_factor = Echarge**3/hbar/Hartree2J * mu_B
 
 contains
     subroutine velocity_latticegauge_simple(k, UU, velocities) !> dH_dk, without 1/hbar
@@ -450,7 +446,7 @@ subroutine sigma_SOAHC_int
     if (cpuid.eq.0) then
         do ieta=1, NumberofEta
             write(etaname, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
-            write(ahcfilename, '(7a)')'sigma_SOAHC_int_eta', trim(adjustl(etaname)), 'meV.dat'
+            write(ahcfilename, '(7a)')'sigma_ISOAHC_eta', trim(adjustl(etaname)), 'meV.dat'
             open(unit=outfileindex, file=ahcfilename)
             write(outfileindex, '("#",a)')' Intrinsic 2nd anomalous hall conductivity, in unit of A.V^-2 for 3D cases.'
             write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
