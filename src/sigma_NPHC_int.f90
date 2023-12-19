@@ -14,8 +14,8 @@ subroutine sigma_NPHC_int
     implicit none
 
     !> magnetic moments in nonlinear planar Hall
-    logical               :: include_m_spin = .true.
-    logical               :: include_m_orb  = .false.
+    logical               :: include_m_spin = .false.
+    logical               :: include_m_orb  = .true.
 
     integer :: NumberofEta              !> NumT
 
@@ -84,10 +84,17 @@ subroutine sigma_NPHC_int
 
     call now(time_start)
     do ik= 1+ cpuid, knv3, num_cpu
-        if (cpuid.eq.0.and. mod(ik/num_cpu, 1000).eq.0) then
+        if ( cpuid.eq.0 .and. mod(ik/num_cpu, 2000).eq.0) then
             call now(time_end)
             write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/knv3', &
-                ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/1000d0/60d0
+                ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/2000d0/60d0
+            time_start= time_end
+        endif
+
+        if ( (real(ik)/real(knv3))>0.95 .and. mod( (ik-cpuid)/num_cpu, 2000 ).eq.0) then
+            call now(time_end)
+            write(*     , '(a, i5, a, f10.2, "min")') 'cpuid =', cpuid, &
+                '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/2000d0/60d0
             time_start= time_end
         endif
 
@@ -174,8 +181,6 @@ subroutine sigma_INPHC_single_k(include_m_spin, include_m_orb, k, energy, Number
 
     integer :: n, m, l, ie, ieta
     
-    real(dp) :: dx = 1d-5
-    real(dp) :: dy = 1d-5
     real(dp) :: k_dx(3)
     real(dp) :: k_dy(3)
 

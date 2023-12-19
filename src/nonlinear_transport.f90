@@ -21,6 +21,11 @@ module nonlinear_transport
     real(dp), parameter :: SOAHC_unit_factor = Echarge**3/hbar/Hartree2J
     real(dp), parameter :: INPHC_unit_factor = Echarge**3/hbar/Hartree2J * mu_B
 
+    !> Differential step size on G and Lambda, in unit of [Length]^-1
+    !> Too small value may lead to large error, our tests show that 1e-5 is better than 1e-6 and 1e-7 
+    real(dp) :: dx = 1d-5
+    real(dp) :: dy = 1d-5
+
 contains
     subroutine velocity_latticegauge_simple(k, UU, velocities) !> dH_dk, without 1/hbar
         use para, only: irvec, crvec, HmnR, pi2zi, ndegen, Nrpts
@@ -57,10 +62,11 @@ contains
     end subroutine velocity_latticegauge_simple
 
     
-    subroutine Lambda_abc_sum(energy, W, velocities, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
+    subroutine Lambda_abc_df(k, energy, W, velocities, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
         use para, only:  OmegaMin, OmegaMax
         implicit none
 
+        real(dp), intent(in)  :: k(3)
         real(dp), intent(in)  :: energy(OmegaNum)
         real(dp), intent(in)  :: W(Num_wann)
         complex(dp),intent(in):: velocities(Num_wann, Num_wann, 3)
@@ -123,7 +129,125 @@ contains
 
         deallocate(vx, vy)
         return
-    end subroutine Lambda_abc_sum
+    end subroutine Lambda_abc_df
+
+
+    subroutine Lambda_abc_dG(k, energy, W, velocities, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
+        use para
+        implicit none
+
+        real(dp), intent(in)  :: k(3)
+        real(dp), intent(in)  :: energy(OmegaNum)
+        real(dp), intent(in)  :: W(Num_wann)
+        complex(dp),intent(inout):: velocities(Num_wann, Num_wann, 3)
+        integer , intent(in)  :: NumberofEta
+        real(dp), intent(in)  :: Eta_array(NumberofEta)
+        real(dp), intent(out) :: sigma_xyy_k(OmegaNum, NumberofEta)
+        real(dp), intent(out) :: sigma_yxx_k(OmegaNum, NumberofEta)
+
+        integer :: m, n, ie, ieta
+
+        real(dp) :: mu, Fermi
+
+        real(dp) :: k_dx(3)
+        real(dp) :: k_dy(3)
+        
+        complex(dp), allocatable :: Hamk_bulk(:, :)
+        complex(dp), allocatable :: Amat(:, :)
+        complex(dp), allocatable :: UU(:, :)
+        complex(dp), allocatable :: UU_dag(:, :)
+
+        real(dp), allocatable :: W_dx(:)
+        real(dp), allocatable :: W_dy(:)
+
+        complex(dp), allocatable :: vx(:, :),    vy(:, :)
+        complex(dp), allocatable :: vx_dx(:, :), vy_dx(:, :)  
+        complex(dp), allocatable :: vx_dy(:, :), vy_dy(:, :) 
+
+        real(dp) :: G_xx, G_xy, G_yx, G_yy, G_yy_dx, G_xy_dy, G_xx_dy, G_yx_dx
+
+        allocate( Hamk_bulk (Num_wann, Num_wann))
+        allocate( Amat (Num_wann, Num_wann))
+        allocate( UU (Num_wann, Num_wann))
+        allocate( UU_dag (Num_wann, Num_wann))
+
+        allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
+        vx = velocities(:,:,1)
+        vy = velocities(:,:,2)
+
+        !===========================================================================
+        !> k + dk_x
+        allocate( W_dx (Num_wann))   
+        allocate( vx_dx(Num_wann, Num_wann), vy_dx(Num_wann, Num_wann))
+
+        k_dx = k+(/Origin_cell%Rua(1)*dx , Origin_cell%Rub(1)*dx , Origin_cell%Ruc(1)*dx/)/twopi
+
+        call ham_bulk_latticegauge(k_dx, Hamk_bulk)
+        UU=Hamk_bulk
+        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dx)
+        UU_dag= conjg(transpose(UU))
+        call velocity_latticegauge_simple(k_dx, UU, velocities)
+        vx_dx = velocities(:,:,1)
+        vy_dx = velocities(:,:,2)
+        !===========================================================================
+
+        !===========================================================================
+        !> k + dk_y
+        allocate( W_dy (Num_wann))
+        allocate( vx_dy(Num_wann, Num_wann), vy_dy(Num_wann, Num_wann))
+
+        k_dy = k+(/Origin_cell%Rua(2)*dy , Origin_cell%Rub(2)*dy , Origin_cell%Ruc(2)*dy/)/twopi
+
+        call ham_bulk_latticegauge(k_dy, Hamk_bulk)
+        UU=Hamk_bulk
+        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dy)
+        UU_dag= conjg(transpose(UU))
+        call velocity_latticegauge_simple(k_dy, UU, velocities)
+        vx_dy = velocities(:,:,1)
+        vy_dy = velocities(:,:,2)
+        !===========================================================================
+
+        sigma_xyy_k        = 0d0
+        sigma_yxx_k        = 0d0
+
+        do m= 1, Num_wann
+
+            !> calculate G for each band
+            G_xx=0d0; G_xy=0d0; G_yx=0d0; G_yy=0d0
+            G_yy_dx=0d0; G_xy_dy=0d0; G_xx_dy=0d0; G_yx_dx=0d0
+
+            do n= 1, Num_wann
+                if (ABS(W(m)-W(n)) < band_degeneracy_threshold) cycle
+                G_xx= G_xx+ 2.d0*real(vx(m, n)*vx(n, m)/((W(m)-W(n))**3))
+                G_xy= G_xy+ 2.d0*real(vx(m, n)*vy(n, m)/((W(m)-W(n))**3))
+                G_yx= G_yx+ 2.d0*real(vy(m, n)*vx(n, m)/((W(m)-W(n))**3))
+                G_yy= G_yy+ 2.d0*real(vy(m, n)*vy(n, m)/((W(m)-W(n))**3))
+
+                G_yy_dx= G_yy_dx + 2.d0*real( vy_dx(n, m)*vy_dx(m, n) )/(W_dx(m) - W_dx(n))**3
+                G_yx_dx= G_yx_dx + 2.d0*real( vy_dx(n, m)*vx_dx(m, n) )/(W_dx(m) - W_dx(n))**3
+                
+                G_xy_dy= G_xy_dy + 2.d0*real( vx_dy(n, m)*vy_dy(m, n) )/(W_dy(m) - W_dy(n))**3
+                G_xx_dy= G_xx_dy + 2.d0*real( vx_dy(n, m)*vx_dy(m, n) )/(W_dy(m) - W_dy(n))**3
+            enddo ! n
+
+            !> consider the Fermi-distribution according to the brodening Earc_eta
+            do ieta=1, NumberofEta
+                do ie=1, OmegaNum
+                    mu = energy(ie)
+                    Fermi= 1d0/(Exp((W(m)-mu)/Eta_array(ieta))+1d0)
+                    
+                    sigma_xyy_k(ie,ieta)= sigma_xyy_k(ie,ieta) &
+                        - ((G_yy_dx - G_yy)/dx - (G_xy_dy - G_xy)/dy)*Fermi
+                    sigma_yxx_k(ie,ieta)= sigma_yxx_k(ie,ieta) &
+                        - ((G_xx_dy - G_xx)/dy - (G_yx_dx - G_yx)/dx)*Fermi
+                enddo ! ie
+            enddo ! ieta
+        enddo ! m
+
+        deallocate(vx, vy, Hamk_bulk, Amat, UU, UU_dag)
+        deallocate(W_dx, W_dy, vx_dx, vx_dy, vy_dx, vy_dy)
+        return
+    end subroutine Lambda_abc_dG
 
 
     subroutine sigma_SOAHC_int_single_k(k, energy, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
@@ -162,7 +286,7 @@ contains
     
         call velocity_latticegauge_simple(k, UU, velocities)
     
-        call Lambda_abc_sum(energy, W, velocities, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
+        call Lambda_abc_df(k, energy, W, velocities, NumberofEta, Eta_array, sigma_xyy_k, sigma_yxx_k)
     
         deallocate( W, Hamk_bulk, UU, velocities)
         return
