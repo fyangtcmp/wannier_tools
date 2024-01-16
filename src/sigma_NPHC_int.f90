@@ -13,10 +13,6 @@ subroutine sigma_NPHC_int
     use nonlinear_transport
     implicit none
 
-    !> magnetic moments in nonlinear planar Hall
-    logical               :: include_m_spin = .false.
-    logical               :: include_m_orb  = .true.
-
     integer :: NumberofEta              !> NumT
 
     integer :: ik, ikx, iky, ikz
@@ -27,7 +23,7 @@ subroutine sigma_NPHC_int
     character*40 :: ahcfilename, etaname
     real(dp), allocatable :: Eta_array(:)
 
-    real(dp), allocatable :: energy(:)!> Fermi energy, dim= OmegaNum
+    real(dp), allocatable :: energy(:)  !> Fermi energy, dim= OmegaNum
 
     real(dp) :: time_start, time_end
 
@@ -84,17 +80,10 @@ subroutine sigma_NPHC_int
 
     call now(time_start)
     do ik= 1+ cpuid, knv3, num_cpu
-        if ( cpuid.eq.0 .and. mod(ik/num_cpu, 2000).eq.0) then
+        if (cpuid.eq.0 .and. mod(ik/num_cpu, 2000).eq.0) then
             call now(time_end)
             write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/knv3', &
                 ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/2000d0/60d0
-            time_start= time_end
-        endif
-
-        if ( (real(ik)/real(knv3))>0.95 .and. mod( (ik-cpuid)/num_cpu, 2000 ).eq.0) then
-            call now(time_end)
-            write(*     , '(a, i5, a, f10.2, "min")') 'cpuid =', cpuid, &
-                '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/2000d0/60d0
             time_start= time_end
         endif
 
@@ -106,7 +95,7 @@ subroutine sigma_NPHC_int
             + K3D_vec2_cube*(iky-1)/dble(Nk2)  &
             + K3D_vec3_cube*(ikz-1)/dble(Nk3)
 
-        call sigma_INPHC_single_k(include_m_spin, include_m_orb, k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
+        call sigma_INPHC_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
 
         Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi+ Chi_xyyy_k
         Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi+ Chi_yxxx_k
@@ -159,15 +148,12 @@ subroutine sigma_NPHC_int
 end subroutine
 
 
-subroutine sigma_INPHC_single_k(include_m_spin, include_m_orb, k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
+subroutine sigma_INPHC_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
 
-    use nonlinear_transport, only: velocity_latticegauge_simple
+    use nonlinear_transport
     use magnetic_moments
     use para
     implicit none
-
-    logical, intent(in)   :: include_m_spin
-    logical, intent(in)   :: include_m_orb 
 
     real(dp), intent(in)  :: k(3)
     real(dp), intent(in)  :: energy(OmegaNum)

@@ -1,6 +1,6 @@
 module magnetic_moments
     use para, only: dp, zi, mu_B, eV2Hartree, Num_wann, Echarge, hbar, Bohr_radius
-    use nonlinear_transport, only: band_degeneracy_threshold
+    ! use nonlinear_transport, only: band_degeneracy_threshold
     implicit none
 
     !> Lande g-factor
@@ -61,6 +61,8 @@ contains
         complex(dp), intent(in)  :: velocities(Num_wann, Num_wann,3)
         complex(dp), intent(out) :: M_L(Num_wann, Num_wann, 3)
 
+        real(dp):: band_degeneracy_threshold2  = 3.6749d-5
+
         real(dp) :: dEpl, dEpn, inv_omega_plpn
         M_L = 0d0
 
@@ -69,7 +71,7 @@ contains
                 do p= 1, Num_wann
                     dEpl = W(p) - W(l)
                     dEpn = W(p) - W(n)
-                    if ((ABS(dEpl) < band_degeneracy_threshold) .or. (ABS(dEpn) < band_degeneracy_threshold)) cycle
+                    if ((ABS(dEpl) < band_degeneracy_threshold2) .or. (ABS(dEpn) < band_degeneracy_threshold2)) cycle
                     
                     inv_omega_plpn = (1/dEpl + 1/dEpn)
                     M_L(l,n,1) = M_L(l,n,1) + inv_omega_plpn * velocities(l,p,2) * velocities(p,n,3)
