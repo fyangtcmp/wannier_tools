@@ -450,6 +450,7 @@
 
      logical :: sigma_SOAHC_int_calc = .false.
      logical :: sigma_NPHC_int_calc = .false.
+     logical :: band_geo_props_kplane_calc = .false.
      
      namelist / Control / BulkBand_calc, BulkFS_calc,  BulkFS_Plane_calc, &
                           BulkFS_plane_stack_calc,  BulkGap_plane_calc, &
@@ -482,7 +483,7 @@
                           LandauLevel_B_dos_calc,LanczosBand_calc,LanczosDos_calc, &
                           LandauLevel_B_calc, LandauLevel_kplane_calc,landau_chern_calc, &
                           FermiLevel_calc,ANE_calc, export_newhr,export_maghr,w3d_nested_calc, &
-                          sigma_SOAHC_int_calc, sigma_NPHC_int_calc
+                          sigma_SOAHC_int_calc, sigma_NPHC_int_calc, band_geo_props_kplane_calc
 
      integer :: Nslab  ! Number of slabs for 2d Slab system
      integer :: Nslab1 ! Number of slabs for 1D wire system
@@ -581,13 +582,18 @@
      integer :: topsurface_atom_index
      real(dp) :: shift_to_topsurface_cart(3)
 
+     !> magnetic moments in nonlinear planar Hall
+     logical :: include_m_spin
+     logical :: include_m_orb
+
      !> namelist parameters
      namelist /PARAMETERS/ Eta_Arc,EF_broadening, OmegaNum, OmegaNum_unfold, OmegaMin, OmegaMax, &
         E_arc, Nk1, Nk2, Nk3, NP, Gap_threshold, Tmin, Tmax, NumT, &
         NBTau, BTauNum, BTauMax, Rcut, Magp, Magq, Magp_min, Magp_max, Nslice_BTau_Max, &
         wcc_neighbour_tol, wcc_calc_tol, Beta,NumLCZVecs, &
         Relaxation_Time_Tau, &
-        NumRandomConfs, NumSelectedEigenVals, projection_weight_mode, topsurface_atom_index
+        NumRandomConfs, NumSelectedEigenVals, projection_weight_mode, topsurface_atom_index, &
+        include_m_spin, include_m_orb
     
      real(Dp) :: E_fermi  ! Fermi energy, search E-fermi in OUTCAR for VASP, set to zero for Wien2k
 
@@ -644,6 +650,13 @@
      real(dp),parameter :: Magneticfluxdensity_atomic=  2.35051756758*1E5    ! magnetic field strength in SI unit
      real(dp),parameter :: mu_B= 2.1271d-06 !> Bohr magneton, Hartree/Tesla
      real(dp),parameter :: Hartree2J= 4.359748d-18
+
+     ! The energy threshold to judge the degenerate bands
+     ! For normal hr.dat, the numerical error between two physical degenerate bands is about 0.1~ meV.
+     ! So we set it to 1meV = 3.6749d-5 Hartree, a relatively large value. It will lead to smoother curves of the conductivities.
+     ! If you want larger peaks of the conductivities, or you have symmetrized your hr.dat to reduce the numerical error,
+     ! you can set the threshold to a smaller value like 0.01meV = 3.6749d-7.
+     real(dp),parameter :: band_degeneracy_threshold  = 3.6749d-5
 
      real(dp),parameter :: Pi= 3.14159265358979d0  ! circumference ratio pi  
      real(dp),parameter :: twopi=2d0*Pi    ! two times of Pi

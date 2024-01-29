@@ -157,6 +157,7 @@ subroutine readinput
    ChargeDensity_selected_energies_calc= .FALSE.
    sigma_SOAHC_int_calc = .FALSE.
    sigma_NPHC_int_calc = .FALSE.
+   band_geo_props_kplane_calc = .FALSE.
 
    read(1001, CONTROL, iostat=stat)
    SlabQPI_kplane_calc= SlabQPI_kplane_calc.or.SlabQPI_calc
@@ -215,6 +216,7 @@ subroutine readinput
       write(*, *)"The default Vaule is F"
       write(*, *)"sigma_SOAHC_int_calc"
       write(*, *)"sigma_NPHC_int_calc"
+      write(*, *)"band_geo_props_kplane_calc"
 
       backspace(1001)
       read(1001,fmt='(A)') inline
@@ -293,6 +295,7 @@ subroutine readinput
       write(stdout, *) "ChargeDensity_selected_energies_calc : ", ChargeDensity_selected_energies_calc
       write(stdout, *) "sigma_SOAHC_int_calc              : ", sigma_SOAHC_int_calc
       write(stdout, *) "sigma_NPHC_int_calc               : ", sigma_NPHC_int_calc
+      write(stdout, *) "band_geo_props_kplane_calc        : ", band_geo_props_kplane_calc
    endif
 
 !===============================================================================================================!
@@ -572,6 +575,8 @@ subroutine readinput
    Beta= 100
    Relaxation_Time_Tau= 1d0  ! in ps
    topsurface_atom_index= 0
+   include_m_spin = .true.
+   include_m_orb  = .false.
 
 
    !> by default, we only project on atoms for a given wave function
@@ -634,6 +639,8 @@ subroutine readinput
       write(stdout, '(1x, a, i6   )')'NumRandomConfs:', NumRandomConfs
       write(stdout, '(1x, a, a    )')'Projection weight mode:', projection_weight_mode
       write(stdout, '(1x, a, i8   )')'The size of magnetic supercell is Magq= :', Magq
+      write(stdout, '(1x, a, L4   )')'include_m_spin =', include_m_spin
+      write(stdout, '(1x, a, L4   )')'include_m_orb  =', include_m_orb
    endif
 
    !> changed to atomic units
