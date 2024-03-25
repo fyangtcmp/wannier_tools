@@ -586,6 +586,14 @@
      logical :: include_m_spin
      logical :: include_m_orb
 
+     ! The energy threshold to judge the degenerate bands
+     ! For normal hr.dat, the numerical error between two physical degenerate bands is about 0.1~ meV.
+     ! So we set it to 1meV = 3.6749d-5 Hartree (see readinput.f90), 
+     ! a relatively large value. It will lead to smoother curves of the conductivities.
+     ! If you want larger peaks of the conductivities, or you have symmetrized your hr.dat to reduce the numerical error,
+     ! you can set the threshold to a smaller value like 0.01meV = 3.6749d-7.
+     real(dp) :: band_degeneracy_threshold
+
      !> namelist parameters
      namelist /PARAMETERS/ Eta_Arc,EF_broadening, OmegaNum, OmegaNum_unfold, OmegaMin, OmegaMax, &
         E_arc, Nk1, Nk2, Nk3, NP, Gap_threshold, Tmin, Tmax, NumT, &
@@ -593,7 +601,7 @@
         wcc_neighbour_tol, wcc_calc_tol, Beta,NumLCZVecs, &
         Relaxation_Time_Tau, &
         NumRandomConfs, NumSelectedEigenVals, projection_weight_mode, topsurface_atom_index, &
-        include_m_spin, include_m_orb
+        include_m_spin, include_m_orb, band_degeneracy_threshold
     
      real(Dp) :: E_fermi  ! Fermi energy, search E-fermi in OUTCAR for VASP, set to zero for Wien2k
 
@@ -650,13 +658,6 @@
      real(dp),parameter :: Magneticfluxdensity_atomic=  2.35051756758*1E5    ! magnetic field strength in SI unit
      real(dp),parameter :: mu_B= 2.1271d-06 !> Bohr magneton, Hartree/Tesla
      real(dp),parameter :: Hartree2J= 4.359748d-18
-
-     ! The energy threshold to judge the degenerate bands
-     ! For normal hr.dat, the numerical error between two physical degenerate bands is about 0.1~ meV.
-     ! So we set it to 1meV = 3.6749d-5 Hartree, a relatively large value. It will lead to smoother curves of the conductivities.
-     ! If you want larger peaks of the conductivities, or you have symmetrized your hr.dat to reduce the numerical error,
-     ! you can set the threshold to a smaller value like 0.01meV = 3.6749d-7.
-     real(dp),parameter :: band_degeneracy_threshold  = 3.6749d-5
 
      real(dp),parameter :: Pi= 3.14159265358979d0  ! circumference ratio pi  
      real(dp),parameter :: twopi=2d0*Pi    ! two times of Pi

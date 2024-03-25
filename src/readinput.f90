@@ -575,8 +575,10 @@ subroutine readinput
    Beta= 100
    Relaxation_Time_Tau= 1d0  ! in ps
    topsurface_atom_index= 0
+
    include_m_spin = .true.
-   include_m_orb  = .false.
+   include_m_orb  = .true.
+   band_degeneracy_threshold = 3.6749d-5
 
 
    !> by default, we only project on atoms for a given wave function
@@ -641,6 +643,7 @@ subroutine readinput
       write(stdout, '(1x, a, i8   )')'The size of magnetic supercell is Magq= :', Magq
       write(stdout, '(1x, a, L4   )')'include_m_spin =', include_m_spin
       write(stdout, '(1x, a, L4   )')'include_m_orb  =', include_m_orb
+      write(stdout, '(1x, a, f16.5)')'band_degeneracy_threshold : ', band_degeneracy_threshold
    endif
 
    !> changed to atomic units

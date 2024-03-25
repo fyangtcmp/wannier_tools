@@ -778,6 +778,7 @@
      if (sigma_SOAHC_int_calc)then
         if(cpuid.eq.0)write(stdout, *)' '
         if(cpuid.eq.0)write(stdout, *)
+        call now(time_start)
         call sigma_ISOAHC
         call now(time_end)
         call print_time_cost(time_start, time_end, 'sigma_SOAHC_int')
@@ -788,6 +789,7 @@
      if (sigma_NPHC_int_calc)then
         if(cpuid.eq.0)write(stdout, *)' '
         if(cpuid.eq.0)write(stdout, *)
+        call now(time_start)
         call sigma_INPHC
         call now(time_end)
         call print_time_cost(time_start, time_end, 'sigma_NPHC_int')
@@ -798,6 +800,7 @@
      if (band_geo_props_kplane_calc)then
       if(cpuid.eq.0)write(stdout, *)' '
       if(cpuid.eq.0)write(stdout, *)
+      call now(time_start)
       call band_geo_props_kplane
       call now(time_end)
       call print_time_cost(time_start, time_end, 'band_geo_props_kplane')

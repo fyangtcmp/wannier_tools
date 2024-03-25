@@ -72,9 +72,9 @@ contains
                     if ((ABS(dEpl) < band_degeneracy_threshold) .or. (ABS(dEpn) < band_degeneracy_threshold)) cycle
                     
                     inv_omega_plpn = (1/dEpl + 1/dEpn)
-                    M_L(l,n,1) = M_L(l,n,1) + inv_omega_plpn * velocities(l,p,2) * velocities(p,n,3)
-                    M_L(l,n,2) = M_L(l,n,2) + inv_omega_plpn * velocities(l,p,3) * velocities(p,n,1)
-                    M_L(l,n,3) = M_L(l,n,3) + inv_omega_plpn * velocities(l,p,1) * velocities(p,n,2)
+                    M_L(l,n,1) = M_L(l,n,1) + inv_omega_plpn * (velocities(l,p,2) * velocities(p,n,3) - velocities(l,p,3) * velocities(p,n,2))
+                    M_L(l,n,2) = M_L(l,n,2) + inv_omega_plpn * (velocities(l,p,3) * velocities(p,n,1) - velocities(l,p,1) * velocities(p,n,3))
+                    M_L(l,n,3) = M_L(l,n,3) + inv_omega_plpn * (velocities(l,p,1) * velocities(p,n,2) - velocities(l,p,2) * velocities(p,n,1))
                 enddo !p
             enddo !n
         enddo !l

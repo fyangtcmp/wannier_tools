@@ -65,7 +65,7 @@ subroutine band_geo_props_kplane
     outfileindex= outfileindex+ 1
     if (cpuid==0) then
         open(unit=outfileindex, file='band_geometry_kplane.dat')
-        write(outfileindex, '(9a12)')'# kx (2pi/x)', 'ky (2pi/y)', 'kz (2pi/z)', & ! "kx' (1/A)", "ky' (1/A)", "kz' (1/A)", &
+        write(outfileindex, '(9a12)')'# k1', 'k2', 'k3', & ! "kx' (1/A)", "ky' (1/A)", "kz' (1/A)", &
             'G_xx', 'G_xy', 'G_yx', 'G_yy', 'L_xyy', 'L_yxx' 
 
         ik= 0

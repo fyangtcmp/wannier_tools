@@ -292,8 +292,7 @@ contains
     end subroutine sigma_ISOAHC_single_k
 
 
-    subroutine sigma_INPHC_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
-
+    subroutine sigma_INPHC_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k_S, Chi_xyyy_k_L, Chi_yxxx_k_S, Chi_yxxx_k_L)
         use magnetic_moments
         use para
         implicit none
@@ -302,8 +301,10 @@ contains
         real(dp), intent(in)  :: energy(OmegaNum)
         integer , intent(in)  :: NumberofEta
         real(dp), intent(in)  :: Eta_array(NumberofEta)
-        real(dp), intent(out) :: Chi_xyyy_k(OmegaNum, NumberofEta)
-        real(dp), intent(out) :: Chi_yxxx_k(OmegaNum, NumberofEta)
+        real(dp), intent(out) :: Chi_xyyy_k_S(OmegaNum, NumberofEta)
+        real(dp), intent(out) :: Chi_yxxx_k_S(OmegaNum, NumberofEta)
+        real(dp), intent(out) :: Chi_xyyy_k_L(OmegaNum, NumberofEta)
+        real(dp), intent(out) :: Chi_yxxx_k_L(OmegaNum, NumberofEta)
     
         complex(dp), allocatable :: M_S(:, :, :) !> spin magnetic moments
         complex(dp), allocatable :: M_L(:, :, :) !> orbital magnetic moments
@@ -327,13 +328,15 @@ contains
         real(dp), allocatable :: W_dy(:)
     
         complex(dp), allocatable :: sx(:, :), sy(:, :), sz(:, :)
+        complex(dp), allocatable :: lx(:, :), ly(:, :), lz(:, :)
         complex(dp), allocatable :: vx(:, :), vy(:, :)
         complex(dp), allocatable :: velocities(:,:,:)
     
         complex(dp), allocatable :: vx_dx(:, :), vy_dx(:, :)  
         complex(dp), allocatable :: vx_dy(:, :), vy_dy(:, :) 
     
-        real(dp) :: Lambda_xyy, Lambda_yyy, Lambda_yxx, Lambda_xxx
+        real(dp) :: Lambda_xyy_S, Lambda_yyy_S, Lambda_yxx_S, Lambda_xxx_S
+        real(dp) :: Lambda_xyy_L, Lambda_yyy_L, Lambda_yxx_L, Lambda_xxx_L
         real(dp) :: G_xx, G_xy, G_yx, G_yy, G_yy_dx, G_xy_dy, G_xx_dy, G_yx_dx
         real(dp) :: dEnm, dEnm3, dEml, dEnl
         
@@ -348,6 +351,7 @@ contains
         allocate( velocities(Num_wann, Num_wann, 3))
         allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
         allocate( sx(Num_wann, Num_wann), sy(Num_wann, Num_wann), sz(Num_wann, Num_wann))
+        allocate( lx(Num_wann, Num_wann), ly(Num_wann, Num_wann), lz(Num_wann, Num_wann))
     
         call ham_bulk_latticegauge(k, Hamk_bulk)
         UU=Hamk_bulk
@@ -366,25 +370,24 @@ contains
         M_L = 0d0
         if (include_m_spin) then
             call spin_magnetic_moments(M_S)
-    
             call mat_mul(Num_wann, M_S(:,:,1), UU, Amat)
             call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,1)) 
             call mat_mul(Num_wann, M_S(:,:,2), UU, Amat) 
             call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,2))
             ! call mat_mul(Num_wann, M_S(:,:,3), UU, Amat)
             ! call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,3))
+            sx = -0.5d0 * Lande_g_S * M_S(:,:,1)
+            sy = -0.5d0 * Lande_g_S * M_S(:,:,2)
+            sz = -0.5d0 * Lande_g_S * M_S(:,:,3)
         endif
         if (include_m_orb) then
             call orbital_magnetic_moments(W, velocities, M_L)
-        endif
+            lx = Lande_g_L * M_L(:,:,1)
+            ly = Lande_g_L * M_L(:,:,2)
+            lz = Lande_g_L * M_L(:,:,3) 
+        endif    
     
-        sx = -0.5d0 * Lande_g_S * M_S(:,:,1) + Lande_g_L * M_L(:,:,1)
-        sy = -0.5d0 * Lande_g_S * M_S(:,:,2) + Lande_g_L * M_L(:,:,2)
-        sz = -0.5d0 * Lande_g_S * M_S(:,:,3) + Lande_g_L * M_L(:,:,3) 
-    
-    
-        !===========================================================================
-        !> k + dk_x
+        !> k + dk_x <===============================================================
         allocate( W_dx (Num_wann))   
         allocate( vx_dx(Num_wann, Num_wann), vy_dx(Num_wann, Num_wann))
     
@@ -399,8 +402,7 @@ contains
         vy_dx = velocities(:,:,2)
         !===========================================================================
     
-        !===========================================================================
-        !> k + dk_y
+        !> k + dk_y <===============================================================
         allocate( W_dy (Num_wann))
         allocate( vx_dy(Num_wann, Num_wann), vy_dy(Num_wann, Num_wann))
     
@@ -415,8 +417,10 @@ contains
         vy_dy = velocities(:,:,2)
         !===========================================================================
     
-        Chi_xyyy_k = 0d0
-        Chi_yxxx_k = 0d0
+        Chi_xyyy_k_S = 0d0
+        Chi_yxxx_k_S = 0d0
+        Chi_xyyy_k_L = 0d0
+        Chi_yxxx_k_L = 0d0
     
         do n= 1, Num_wann
             if (W(n)<OmegaMin- 2.d-2 .or. W(n)>OmegaMax+ 2.d-2) cycle 
@@ -428,10 +432,14 @@ contains
             G_xy_dy= 0d0 
             G_xx_dy= 0d0 
             G_yx_dx= 0d0        
-            Lambda_xyy= 0d0
-            Lambda_yyy= 0d0
-            Lambda_yxx= 0d0
-            Lambda_xxx= 0d0
+            Lambda_xyy_S = 0d0
+            Lambda_yyy_S = 0d0
+            Lambda_yxx_S = 0d0
+            Lambda_xxx_S = 0d0
+            Lambda_xyy_L = 0d0
+            Lambda_yyy_L = 0d0
+            Lambda_yxx_L = 0d0
+            Lambda_xxx_L = 0d0
     
             do m= 1, Num_wann
                 dEnm= W(n) - W(m)           
@@ -449,27 +457,53 @@ contains
                 G_xy_dy= G_xy_dy + 2.d0*real( vx_dy(n, m)*vy_dy(m, n) )/(W_dy(n) - W_dy(m))**3
                 G_xx_dy= G_xx_dy + 2.d0*real( vx_dy(n, m)*vx_dy(m, n) )/(W_dy(n) - W_dy(m))**3
     
-                Lambda_xyy= Lambda_xyy + 6.d0* real( vx(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
-                Lambda_yyy= Lambda_yyy + 6.d0* real( vy(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
-                Lambda_yxx= Lambda_yxx + 6.d0* real( vy(n, m)*vx(m, n)*(sx(n, n)-sx(m, m)) )/dEnm3/dEnm
-                Lambda_xxx= Lambda_xxx + 6.d0* real( vx(n, m)*vx(m, n)*(sx(n, n)-sx(m, m)) )/dEnm3/dEnm
-                
-                do l= 1, Num_wann
-                    dEnl= W(n)-W(l)
-                    dEml= W(m)-W(l)                    
-                    if (ABS(dEnl) > band_degeneracy_threshold) then
-                        Lambda_xyy= Lambda_xyy - 2.d0* real( (vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)) *sy(n, l)) /dEnm3/dEnl
-                        Lambda_yyy= Lambda_yyy - 2.d0* real( (vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)) *sy(n, l)) /dEnm3/dEnl
-                        Lambda_yxx= Lambda_yxx - 2.d0* real( (vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)) *sx(n, l)) /dEnm3/dEnl
-                        Lambda_xxx= Lambda_xxx - 2.d0* real( (vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)) *sx(n, l)) /dEnm3/dEnl
-                    endif
-                    if (ABS(dEml) > band_degeneracy_threshold) then
-                        Lambda_xyy= Lambda_xyy - 2.d0* real( (vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)) *sy(m, l)) /dEnm3/dEml
-                        Lambda_yyy= Lambda_yyy - 2.d0* real( (vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)) *sy(m, l)) /dEnm3/dEml
-                        Lambda_yxx= Lambda_yxx - 2.d0* real( (vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)) *sx(m, l)) /dEnm3/dEml
-                        Lambda_xxx= Lambda_xxx - 2.d0* real( (vx(l, n)*vx(n, m)+vx(l, n)*vx(n, m)) *sx(m, l)) /dEnm3/dEml
-                    endif
-                enddo ! l
+                if (include_m_spin) then
+                    Lambda_xyy_S = Lambda_xyy_S + 6.d0* real( vx(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
+                    Lambda_yyy_S = Lambda_yyy_S + 6.d0* real( vy(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
+                    Lambda_yxx_S = Lambda_yxx_S + 6.d0* real( vy(n, m)*vx(m, n)*(sx(n, n)-sx(m, m)) )/dEnm3/dEnm
+                    Lambda_xxx_S = Lambda_xxx_S + 6.d0* real( vx(n, m)*vx(m, n)*(sx(n, n)-sx(m, m)) )/dEnm3/dEnm
+                    
+                    do l= 1, Num_wann
+                        dEnl= W(n)-W(l)
+                        dEml= W(m)-W(l)                    
+                        if (ABS(dEnl) > band_degeneracy_threshold) then
+                            Lambda_xyy_S = Lambda_xyy_S - 2.d0* real( (vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)) *sy(n, l)) /dEnm3/dEnl
+                            Lambda_yyy_S = Lambda_yyy_S - 2.d0* real( (vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)) *sy(n, l)) /dEnm3/dEnl
+                            Lambda_yxx_S = Lambda_yxx_S - 2.d0* real( (vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)) *sx(n, l)) /dEnm3/dEnl
+                            Lambda_xxx_S = Lambda_xxx_S - 2.d0* real( (vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)) *sx(n, l)) /dEnm3/dEnl
+                        endif
+                        if (ABS(dEml) > band_degeneracy_threshold) then
+                            Lambda_xyy_S = Lambda_xyy_S - 2.d0* real( (vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)) *sy(m, l)) /dEnm3/dEml
+                            Lambda_yyy_S = Lambda_yyy_S - 2.d0* real( (vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)) *sy(m, l)) /dEnm3/dEml
+                            Lambda_yxx_S = Lambda_yxx_S - 2.d0* real( (vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)) *sx(m, l)) /dEnm3/dEml
+                            Lambda_xxx_S = Lambda_xxx_S - 2.d0* real( (vx(l, n)*vx(n, m)+vx(l, n)*vx(n, m)) *sx(m, l)) /dEnm3/dEml
+                        endif
+                    enddo ! l
+                endif
+
+                if (include_m_orb) then
+                    Lambda_xyy_L = Lambda_xyy_L + 6.d0* real( vx(n, m)*vy(m, n)*(ly(n, n)-ly(m, m)) )/dEnm3/dEnm
+                    Lambda_yyy_L = Lambda_yyy_L + 6.d0* real( vy(n, m)*vy(m, n)*(ly(n, n)-ly(m, m)) )/dEnm3/dEnm
+                    Lambda_yxx_L = Lambda_yxx_L + 6.d0* real( vy(n, m)*vx(m, n)*(lx(n, n)-lx(m, m)) )/dEnm3/dEnm
+                    Lambda_xxx_L = Lambda_xxx_L + 6.d0* real( vx(n, m)*vx(m, n)*(lx(n, n)-lx(m, m)) )/dEnm3/dEnm
+                    
+                    do l= 1, Num_wann
+                        dEnl= W(n)-W(l)
+                        dEml= W(m)-W(l)                    
+                        if (ABS(dEnl) > band_degeneracy_threshold) then
+                            Lambda_xyy_L = Lambda_xyy_L - 2.d0* real( (vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)) *ly(n, l)) /dEnm3/dEnl
+                            Lambda_yyy_L = Lambda_yyy_L - 2.d0* real( (vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)) *ly(n, l)) /dEnm3/dEnl
+                            Lambda_yxx_L = Lambda_yxx_L - 2.d0* real( (vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)) *lx(n, l)) /dEnm3/dEnl
+                            Lambda_xxx_L = Lambda_xxx_L - 2.d0* real( (vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)) *lx(n, l)) /dEnm3/dEnl
+                        endif
+                        if (ABS(dEml) > band_degeneracy_threshold) then
+                            Lambda_xyy_L = Lambda_xyy_L - 2.d0* real( (vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)) *ly(m, l)) /dEnm3/dEml
+                            Lambda_yyy_L = Lambda_yyy_L - 2.d0* real( (vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)) *ly(m, l)) /dEnm3/dEml
+                            Lambda_yxx_L = Lambda_yxx_L - 2.d0* real( (vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)) *lx(m, l)) /dEnm3/dEml
+                            Lambda_xxx_L = Lambda_xxx_L - 2.d0* real( (vx(l, n)*vx(n, m)+vx(l, n)*vx(n, m)) *lx(m, l)) /dEnm3/dEml
+                        endif
+                    enddo ! l
+                endif
     
             enddo ! m
     
@@ -483,10 +517,18 @@ contains
                         diffFermi=0.d0
                     endif
     
-                    Chi_xyyy_k(ie,ieta) = Chi_xyyy_k(ie,ieta) + real( (vx(n,n)*Lambda_yyy - vy(n,n)*Lambda_xyy) &
-                        + ((G_yy_dx - G_yy)/dx - (G_xy_dy - G_xy)/dy)*sy(n,n) ) * diffFermi
-                    Chi_yxxx_k(ie,ieta) = Chi_yxxx_k(ie,ieta) + real( (vy(n,n)*Lambda_xxx - vx(n,n)*Lambda_yxx) &
-                        + ((G_xx_dy - G_xx)/dy - (G_yx_dx - G_yx)/dx)*sx(n,n) ) * diffFermi              
+                    if (include_m_spin) then
+                        Chi_xyyy_k_S(ie,ieta) = Chi_xyyy_k_S(ie,ieta) + real( (vx(n,n)*Lambda_yyy_S - vy(n,n)*Lambda_xyy_S) &
+                            + ((G_yy_dx - G_yy)/dx - (G_xy_dy - G_xy)/dy)*sy(n,n) ) * diffFermi
+                        Chi_yxxx_k_S(ie,ieta) = Chi_yxxx_k_S(ie,ieta) + real( (vy(n,n)*Lambda_xxx_S - vx(n,n)*Lambda_yxx_S) &
+                            + ((G_xx_dy - G_xx)/dy - (G_yx_dx - G_yx)/dx)*sx(n,n) ) * diffFermi
+                    endif
+                    if (include_m_orb) then
+                        Chi_xyyy_k_L(ie,ieta) = Chi_xyyy_k_L(ie,ieta) + real( (vx(n,n)*Lambda_yyy_L - vy(n,n)*Lambda_xyy_L) &
+                            + ((G_yy_dx - G_yy)/dx - (G_xy_dy - G_xy)/dy)*ly(n,n) ) * diffFermi
+                        Chi_yxxx_k_L(ie,ieta) = Chi_yxxx_k_L(ie,ieta) + real( (vy(n,n)*Lambda_xxx_L - vx(n,n)*Lambda_yxx_L) &
+                            + ((G_xx_dy - G_xx)/dy - (G_yx_dx - G_yx)/dx)*lx(n,n) ) * diffFermi
+                    endif    
     
                 enddo ! ie
             enddo ! ieta
@@ -494,12 +536,11 @@ contains
     
         deallocate(W, vx, vy, Hamk_bulk, Amat, UU, UU_dag, velocities)
         deallocate(W_dx, W_dy, vx_dx, vx_dy, vy_dx, vy_dy)
-        deallocate(sx, sy, sz)
+        deallocate(sx, sy, sz, lx, ly, lz)
         deallocate(M_S, M_L)
         return
-    
     end subroutine sigma_INPHC_single_k
-    
+
 end module
 
 
@@ -551,7 +592,8 @@ subroutine sigma_ISOAHC
     character*40 :: ahcfilename, etaname
     real(dp), allocatable :: Eta_array(:)
 
-    integer :: ik, ik_local, ikx, iky, ikz, knv3
+    integer :: ik, ik_local, ikx, iky, ikz 
+    integer(8) :: knv3
     integer :: ik_index
     integer :: ie, icore, ieta
     integer :: ierr
@@ -810,7 +852,8 @@ subroutine sigma_INPHC
 
     integer :: ik, ikx, iky, ikz
     integer :: ie, ieta
-    integer :: ierr, knv3
+    integer :: ierr
+    integer(8) :: knv3
     real(dp) :: k(3)
 
     character*40 :: ahcfilename, etaname
@@ -820,12 +863,18 @@ subroutine sigma_INPHC
 
     real(dp) :: time_start, time_end
 
-    real(dp), allocatable :: Chi_xyyy_k         (:,:)
-    real(dp), allocatable :: Chi_xyyy_tensor    (:,:)
-    real(dp), allocatable :: Chi_xyyy_tensor_mpi(:,:)
-    real(dp), allocatable :: Chi_yxxx_k         (:,:)
-    real(dp), allocatable :: Chi_yxxx_tensor    (:,:)
-    real(dp), allocatable :: Chi_yxxx_tensor_mpi(:,:)
+    real(dp), allocatable :: Chi_xyyy_k_S         (:,:)
+    real(dp), allocatable :: Chi_xyyy_k_L         (:,:)
+    real(dp), allocatable :: Chi_yxxx_k_S         (:,:)
+    real(dp), allocatable :: Chi_yxxx_k_L         (:,:)
+    real(dp), allocatable :: Chi_xyyy_tensor_S    (:,:)
+    real(dp), allocatable :: Chi_xyyy_tensor_L    (:,:)
+    real(dp), allocatable :: Chi_yxxx_tensor_S    (:,:)
+    real(dp), allocatable :: Chi_yxxx_tensor_L    (:,:)
+    real(dp), allocatable :: Chi_xyyy_tensor_mpi_S(:,:)
+    real(dp), allocatable :: Chi_xyyy_tensor_mpi_L(:,:)
+    real(dp), allocatable :: Chi_yxxx_tensor_mpi_S(:,:)
+    real(dp), allocatable :: Chi_yxxx_tensor_mpi_L(:,:)
 
     allocate( energy (OmegaNum))
 
@@ -839,17 +888,27 @@ subroutine sigma_INPHC
         stop "The NumT should not more than 7"
     endif
 
-    allocate( Chi_xyyy_k    (OmegaNum, NumberofEta))
-    allocate( Chi_yxxx_k    (OmegaNum, NumberofEta))
-    allocate( Chi_xyyy_tensor    (OmegaNum, NumberofEta))
-    allocate( Chi_xyyy_tensor_mpi(OmegaNum, NumberofEta))
-    allocate( Chi_yxxx_tensor    (OmegaNum, NumberofEta))
-    allocate( Chi_yxxx_tensor_mpi(OmegaNum, NumberofEta))
+    allocate( Chi_xyyy_k_S    (OmegaNum, NumberofEta))
+    allocate( Chi_yxxx_k_S    (OmegaNum, NumberofEta))
+    allocate( Chi_xyyy_k_L    (OmegaNum, NumberofEta))
+    allocate( Chi_yxxx_k_L    (OmegaNum, NumberofEta))
+    allocate( Chi_xyyy_tensor_S    (OmegaNum, NumberofEta))
+    allocate( Chi_yxxx_tensor_S    (OmegaNum, NumberofEta))
+    allocate( Chi_xyyy_tensor_L    (OmegaNum, NumberofEta))
+    allocate( Chi_yxxx_tensor_L    (OmegaNum, NumberofEta))
+    allocate( Chi_xyyy_tensor_mpi_S(OmegaNum, NumberofEta))
+    allocate( Chi_yxxx_tensor_mpi_S(OmegaNum, NumberofEta))
+    allocate( Chi_xyyy_tensor_mpi_L(OmegaNum, NumberofEta))
+    allocate( Chi_yxxx_tensor_mpi_L(OmegaNum, NumberofEta))
 
-    Chi_xyyy_tensor     = 0d0
-    Chi_xyyy_tensor_mpi = 0d0
-    Chi_yxxx_tensor     = 0d0
-    Chi_yxxx_tensor_mpi = 0d0
+    Chi_xyyy_tensor_S     = 0d0
+    Chi_yxxx_tensor_S     = 0d0
+    Chi_xyyy_tensor_L     = 0d0
+    Chi_yxxx_tensor_L     = 0d0
+    Chi_xyyy_tensor_mpi_S = 0d0
+    Chi_yxxx_tensor_mpi_S = 0d0
+    Chi_xyyy_tensor_mpi_L = 0d0
+    Chi_yxxx_tensor_mpi_L = 0d0
 
     !> Fermi energy in Hatree energy, not eV
     do ie=1, OmegaNum
@@ -879,54 +938,63 @@ subroutine sigma_INPHC
             + K3D_vec2_cube*(iky-1)/dble(Nk2)  &
             + K3D_vec3_cube*(ikz-1)/dble(Nk3)
 
-        call sigma_INPHC_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
+        call sigma_INPHC_single_k(k, energy, NumberofEta, Eta_array, Chi_xyyy_k_S, Chi_xyyy_k_L, Chi_yxxx_k_S, Chi_yxxx_k_L)
 
-        Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi+ Chi_xyyy_k
-        Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi+ Chi_yxxx_k
+        Chi_xyyy_tensor_mpi_S = Chi_xyyy_tensor_mpi_S + Chi_xyyy_k_S
+        Chi_yxxx_tensor_mpi_S = Chi_yxxx_tensor_mpi_S + Chi_yxxx_k_S
+        Chi_xyyy_tensor_mpi_L = Chi_xyyy_tensor_mpi_L + Chi_xyyy_k_L
+        Chi_yxxx_tensor_mpi_L = Chi_yxxx_tensor_mpi_L + Chi_yxxx_k_L
     enddo ! ik
 
 
-    call mpi_allreduce(Chi_xyyy_tensor_mpi,Chi_xyyy_tensor,size(Chi_xyyy_tensor),&
-        mpi_dp,mpi_sum,mpi_cmw,ierr)
-    call mpi_allreduce(Chi_yxxx_tensor_mpi,Chi_yxxx_tensor,size(Chi_yxxx_tensor),&
-        mpi_dp,mpi_sum,mpi_cmw,ierr)
+    call mpi_allreduce(Chi_xyyy_tensor_mpi_S, Chi_xyyy_tensor_S, size(Chi_xyyy_tensor_S), mpi_dp,mpi_sum,mpi_cmw,ierr)
+    call mpi_allreduce(Chi_yxxx_tensor_mpi_S, Chi_yxxx_tensor_S, size(Chi_yxxx_tensor_S), mpi_dp,mpi_sum,mpi_cmw,ierr)
+    call mpi_allreduce(Chi_xyyy_tensor_mpi_L, Chi_xyyy_tensor_L, size(Chi_xyyy_tensor_L), mpi_dp,mpi_sum,mpi_cmw,ierr)
+    call mpi_allreduce(Chi_yxxx_tensor_mpi_L, Chi_yxxx_tensor_L, size(Chi_yxxx_tensor_L), mpi_dp,mpi_sum,mpi_cmw,ierr)
 
-    Chi_xyyy_tensor= Chi_xyyy_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-
-    Chi_yxxx_tensor= Chi_yxxx_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+    Chi_xyyy_tensor_S = Chi_xyyy_tensor_S * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+    Chi_yxxx_tensor_S = Chi_yxxx_tensor_S * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+    Chi_xyyy_tensor_L = Chi_xyyy_tensor_L * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+    Chi_yxxx_tensor_L = Chi_yxxx_tensor_L * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
 
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
         do ieta=1, NumberofEta
             write(etaname, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
-            write(ahcfilename, '(7a)')'sigma_INPHC_eta', trim(adjustl(etaname)), 'meV.dat'
-
-            open(unit=outfileindex, file=ahcfilename)
-            write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
-            write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
 
             if (include_m_spin) then
-                write(outfileindex, '("You have     included the spin    magnetic moments.")')
-            else
-                write(outfileindex, '("You have NOT included the spin    magnetic moments.")')
-            endif
-            if (include_m_orb) then
-                write(outfileindex, '("You have     included the orbital magnetic moments.")')
-            else
-                write(outfileindex, '("You have NOT included the orbital magnetic moments.")')
+                write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(etaname)), 'meV.dat'
+                open(unit=outfileindex, file=ahcfilename)
+                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
+                write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
+
+                write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy', '\sigma_yxxx'
+                do ie=1, OmegaNum
+                    write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, Chi_xyyy_tensor_S(ie,ieta), &
+                        Chi_yxxx_tensor_S(ie,ieta)
+                enddo
+                close(outfileindex)
             endif
 
-            write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy', '\sigma_yxxx'
-            do ie=1, OmegaNum
-                write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, Chi_xyyy_tensor(ie,ieta), &
-                    Chi_yxxx_tensor(ie,ieta)
-            enddo
-            close(outfileindex)
+            if (include_m_orb ) then
+                write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(etaname)), 'meV.dat'
+                open(unit=outfileindex, file=ahcfilename)
+                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
+                write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
+
+                write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy', '\sigma_yxxx'
+                do ie=1, OmegaNum
+                    write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, Chi_xyyy_tensor_L(ie,ieta), &
+                        Chi_yxxx_tensor_L(ie,ieta)
+                enddo
+                close(outfileindex)
+            endif
         enddo
     endif
 
     deallocate(energy, Eta_array)
-    deallocate(Chi_xyyy_k, Chi_yxxx_k, Chi_xyyy_tensor, Chi_xyyy_tensor_mpi, Chi_yxxx_tensor, Chi_yxxx_tensor_mpi)
+    deallocate(Chi_xyyy_k_S, Chi_yxxx_k_S, Chi_xyyy_tensor_S, Chi_xyyy_tensor_mpi_S, Chi_yxxx_tensor_S, Chi_yxxx_tensor_mpi_S)
+    deallocate(Chi_xyyy_k_L, Chi_yxxx_k_L, Chi_xyyy_tensor_L, Chi_xyyy_tensor_mpi_L, Chi_yxxx_tensor_L, Chi_yxxx_tensor_mpi_L)
 
     return
 
