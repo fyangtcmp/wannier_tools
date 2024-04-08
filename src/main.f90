@@ -798,14 +798,24 @@
 
      !> calculate the distributions of user defined band geometry properties
      if (band_geo_props_kplane_calc)then
-      if(cpuid.eq.0)write(stdout, *)' '
-      if(cpuid.eq.0)write(stdout, *)
-      call now(time_start)
-      call band_geo_props_kplane
-      call now(time_end)
-      call print_time_cost(time_start, time_end, 'band_geo_props_kplane')
-      if(cpuid.eq.0)write(stdout, *)
-   endif
+         if(cpuid.eq.0)write(stdout, *)' '
+         if(cpuid.eq.0)write(stdout, *)
+         call now(time_start)
+         call band_geo_props_kplane
+         call now(time_end)
+         call print_time_cost(time_start, time_end, 'band_geo_props_kplane')
+         if(cpuid.eq.0)write(stdout, *)
+     endif
+
+     if (drude_weight_calc)then
+         if(cpuid.eq.0)write(stdout, *)' '
+         if(cpuid.eq.0)write(stdout, *)
+         call now(time_start)
+         call drude_weight
+         call now(time_end)
+         call print_time_cost(time_start, time_end, 'drude_weight')
+         if(cpuid.eq.0)write(stdout, *)
+     endif
 
      call now(time_end)
 

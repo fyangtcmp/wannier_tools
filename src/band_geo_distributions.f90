@@ -100,10 +100,6 @@ subroutine ISOAHC_dist_single_k_Ef(k, props)
     real(dp), intent(in)  :: k(3)
     real(dp), intent(out) :: props(6)
 
-    integer :: m, n
-
-    real(dp) :: diffFermi ! mu = 0, the Hamiltonian has been already shifted to Fermi energy
-
     ! eigen value of H
     real(dp),    allocatable :: W(:)
     complex(dp), allocatable :: Hamk_bulk(:, :)
@@ -179,10 +175,6 @@ subroutine INPHC_dist_single_k_Ef(k, props)
 
     complex(dp), allocatable :: M_S(:, :, :) !> spin magnetic moments
     complex(dp), allocatable :: M_L(:, :, :) !> orbital magnetic moments
-
-    integer :: n, m, l !> n m is different from ISOAHC
-
-    real(dp) :: diffFermi ! mu = 0, the Hamiltonian has been already shifted to Fermi energy
     
     ! eigen value of H
     real(dp),    allocatable :: W(:)

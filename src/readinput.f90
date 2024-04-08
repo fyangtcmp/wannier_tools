@@ -158,6 +158,7 @@ subroutine readinput
    sigma_SOAHC_int_calc = .FALSE.
    sigma_NPHC_int_calc = .FALSE.
    band_geo_props_kplane_calc = .FALSE.
+   drude_weight_calc = .FALSE.
 
    read(1001, CONTROL, iostat=stat)
    SlabQPI_kplane_calc= SlabQPI_kplane_calc.or.SlabQPI_calc
@@ -217,6 +218,7 @@ subroutine readinput
       write(*, *)"sigma_SOAHC_int_calc"
       write(*, *)"sigma_NPHC_int_calc"
       write(*, *)"band_geo_props_kplane_calc"
+      write(*, *)"drude_weight_calc"
 
       backspace(1001)
       read(1001,fmt='(A)') inline
@@ -296,6 +298,7 @@ subroutine readinput
       write(stdout, *) "sigma_SOAHC_int_calc              : ", sigma_SOAHC_int_calc
       write(stdout, *) "sigma_NPHC_int_calc               : ", sigma_NPHC_int_calc
       write(stdout, *) "band_geo_props_kplane_calc        : ", band_geo_props_kplane_calc
+      write(stdout, *) "drude_weight_calc                 : ", drude_weight_calc
    endif
 
 !===============================================================================================================!
