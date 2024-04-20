@@ -9,81 +9,59 @@ module nonlinear_transport
     ! logical               :: include_m_spin = .false.
     ! logical               :: include_m_orb  = .true.
 
-    !> Fermi-Dirac distribution
-    real(dp) :: mu, Fermi, diffFermi
-
-    !> eta = 8.617e-5*Temperature
-    !> temperature lists:          20K       50K       70K      100K      200K      300K
-    real(dp):: Eta_array_all(6) = [0.0017d0, 0.0043d0, 0.006d0, 0.0086d0, 0.0172d0, 0.0259d0]*eV2Hartree
-    integer :: NumberofEta = 7
-    
-    character*40 :: ahcfilename, etaname
+    !> temperature, eta = k_B*T = 8.617e-5*T
+    !> temperature lists:                 20K       50K       70K      100K      200K      300K
+    real(dp)     :: Eta_array_fixed(6) = [0.0017d0, 0.0043d0, 0.006d0, 0.0086d0, 0.0172d0, 0.0259d0]*eV2Hartree
+    real(dp)     :: Eta_array      (7) !> in module, must be a constant, so 'Eta_array(Eta_number)' is wrong
+    integer      :: Eta_number    = 7
+    character*40 :: Eta_name, ahcfilename
 
     real(dp) :: time_start, time_end
+
+    !> Fermi energy, dim= OmegaNum
+    real(dp), allocatable :: energy(:)  
     
-    real(dp), parameter :: SOAHC_unit_factor = Echarge**3/hbar/Hartree2J
-    real(dp), parameter :: INPHC_unit_factor = Echarge**3/hbar/Hartree2J * mu_B
-
     !> loop 
-    integer(8) :: n, m, l, ie, ieta, ikx, iky, ikz, ik, knv3
-    integer    :: ierr
+    integer(8) :: ie, ik, ik2, knv3
+    integer    :: n, m, l, ieta, ierr, icore
 
-    !> Differential step size on G and Lambda, in unit of [Length]^-1
+    real(dp) :: k(3), kfine(3)
+
+    !> Differential step size at the k-space, in unit of [Length]^-1
     !> Too small value may lead to large error, our tests show that 1e-5 is better than 1e-6 and 1e-7 
-    real(dp) :: dx = 1d-5
-    real(dp) :: dy = 1d-5
+    real(dp) :: dkx = 1d-5
+    real(dp) :: dky = 1d-5
+
+    real(dp) :: lim=1d7
+
+    !> local fine k-grids
+    integer :: Nk_fine = 5
+    integer :: knv3_fine, ikfine, ikfinex, ikfiney, ikfinez
+
+    !> to decide the number of k-points which will be implemented with local dense k-meshes
+    real(dp),allocatable :: k_fine_list(:,:)
+    integer, allocatable :: displacement(:)
+    integer              :: Nk_adaptive_mpi
+    integer, allocatable :: Nk_adaptive(:) ! Nk_adaptive on every cores
+    integer              :: Nk_adaptive_tol
+    integer, allocatable :: ik_adapt_list_mpi(:)
+    integer, allocatable :: ik_adapt_list    (:)
 
 contains
-    subroutine velocity_latticegauge_simple(k, UU, velocities) !> dH_dk, without 1/hbar
-        use para, only: irvec, crvec, HmnR, pi2zi, ndegen, Nrpts
-        implicit none
-
-        real(dp),    intent(in)  :: k(3)
-        complex(dp), intent(in)  :: UU(Num_wann, Num_wann)
-        complex(dp), intent(out) :: velocities(Num_wann, Num_wann, 3)
-
-        real(dp):: kdotr
-        integer :: iR
-        complex(dp), allocatable :: Amat(:, :), UU_dag(:,:)
-        allocate( Amat(Num_wann, Num_wann), UU_dag(Num_wann, Num_wann))
-
-        velocities= 0d0
-        do iR= 1, Nrpts
-            kdotr= k(1)*irvec(1,iR) + k(2)*irvec(2,iR) + k(3)*irvec(3,iR)
-            velocities(:,:,1)= velocities(:,:,1) + zi*crvec(1, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
-            velocities(:,:,2)= velocities(:,:,2) + zi*crvec(2, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
-            velocities(:,:,3)= velocities(:,:,3) + zi*crvec(3, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
-        enddo ! iR
-
-        UU_dag= conjg(transpose(UU))
-        !> unitility rotate velocity
-        call mat_mul(Num_wann, velocities(:,:,1), UU, Amat)
-        call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,1))
-        call mat_mul(Num_wann, velocities(:,:,2), UU, Amat)
-        call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,2))
-        call mat_mul(Num_wann, velocities(:,:,3), UU, Amat)
-        call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,3))
-
-        deallocate(Amat, UU_dag)
-        return
-    end subroutine velocity_latticegauge_simple
-
-    
-    subroutine Lambda_abc_df(k, energy, W, velocities, Eta_array, sigma_xyy_k, sigma_yxx_k)
+    subroutine Lambda_abc_df(W, velocities, sigma_xyy_k, sigma_yxx_k)
         use para, only:  OmegaMin, OmegaMax
         implicit none
 
-        real(dp), intent(in)  :: k(3)  !> not used, in order to keep the inputs the same as Lambda_abc_dG
-        real(dp), intent(in)  :: energy(OmegaNum)
         real(dp), intent(in)  :: W(Num_wann)
         complex(dp),intent(in):: velocities(Num_wann, Num_wann, 3)
-        real(dp), intent(in)  :: Eta_array(NumberofEta)
-        real(dp), intent(out) :: sigma_xyy_k(OmegaNum, NumberofEta)
-        real(dp), intent(out) :: sigma_yxx_k(OmegaNum, NumberofEta)
+        real(dp), intent(out) :: sigma_xyy_k(OmegaNum, Eta_number)
+        real(dp), intent(out) :: sigma_yxx_k(OmegaNum, Eta_number)
 
+        real(dp), allocatable :: diffFermi(:)
         real(dp) :: G_xy, G_yx, G_xx, G_yy
         complex(dp), allocatable :: vx(:, :), vy(:, :)
 
+        allocate( diffFermi (OmegaNum))
         allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann) )
         vx = velocities(:,:,1)
         vy = velocities(:,:,2)
@@ -109,149 +87,24 @@ contains
                 G_yy= G_yy+ 2.d0*real(vy(m, n)*vy(n, m)/((W(m)-W(n))**3))
             enddo ! n
 
-            !> consider the Fermi-distribution according to the brodening Earc_eta
-            do ieta=1, NumberofEta
-                do ie=1, OmegaNum
-                    mu = energy(ie)
+            do ieta=1, Eta_number
+                !> this format is very important! prevent NaN error
+                diffFermi = -1d0 / (Exp((W(m) - energy)/Eta_array(ieta))+1d0) / (Exp(-(W(m) - energy)/Eta_array(ieta))+1d0) / Eta_array(ieta)
 
-                    !> very important! prevent NaN error
-                    if ((W(m)-mu)/Eta_array(ieta)<50) then
-                        diffFermi= Exp((W(m)-mu)/Eta_array(ieta))/(Exp((W(m)-mu)/Eta_array(ieta))+1d0)**2 /Eta_array(ieta)
-                    else
-                        diffFermi= 0.d0
-                    endif
-
-                    sigma_xyy_k(ie,ieta)= sigma_xyy_k(ie,ieta) &
-                        + (G_yy*real(vx(m,m))-G_xy*real(vy(m,m)))*diffFermi
-                    sigma_yxx_k(ie,ieta)= sigma_yxx_k(ie,ieta) &
-                        + (G_xx*real(vy(m,m))-G_yx*real(vx(m,m)))*diffFermi
-                enddo ! ie
+                sigma_xyy_k(:,ieta)= sigma_xyy_k(:,ieta) + (G_yy*real(vx(m,m))-G_xy*real(vy(m,m)))*diffFermi
+                sigma_yxx_k(:,ieta)= sigma_yxx_k(:,ieta) + (G_xx*real(vy(m,m))-G_yx*real(vx(m,m)))*diffFermi
             enddo ! ieta
         enddo ! m
 
-        deallocate(vx, vy)
-        return
     end subroutine Lambda_abc_df
 
 
-    subroutine Lambda_abc_dG(k, energy, W, velocities, Eta_array, sigma_xyy_k, sigma_yxx_k)
-        use para
-        implicit none
-
-        real(dp), intent(in)  :: k(3)
-        real(dp), intent(in)  :: energy(OmegaNum)
-        real(dp), intent(in)  :: W(Num_wann)
-        complex(dp),intent(inout):: velocities(Num_wann, Num_wann, 3)
-        real(dp), intent(in)  :: Eta_array(NumberofEta)
-        real(dp), intent(out) :: sigma_xyy_k(OmegaNum, NumberofEta)
-        real(dp), intent(out) :: sigma_yxx_k(OmegaNum, NumberofEta)
-
-        real(dp) :: k_dx(3)
-        real(dp) :: k_dy(3)
-        
-        complex(dp), allocatable :: Hamk_bulk(:, :)
-        complex(dp), allocatable :: Amat(:, :)
-        complex(dp), allocatable :: UU(:, :)
-
-        real(dp), allocatable :: W_dx(:)
-        real(dp), allocatable :: W_dy(:)
-
-        complex(dp), allocatable :: vx(:, :),    vy(:, :)
-        complex(dp), allocatable :: vx_dx(:, :), vy_dx(:, :)  
-        complex(dp), allocatable :: vx_dy(:, :), vy_dy(:, :) 
-
-        real(dp) :: G_xx, G_xy, G_yx, G_yy, G_yy_dx, G_xy_dy, G_xx_dy, G_yx_dx
-
-        allocate( Hamk_bulk (Num_wann, Num_wann))
-        allocate( Amat (Num_wann, Num_wann))
-        allocate( UU (Num_wann, Num_wann))
-
-        allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
-        vx = velocities(:,:,1)
-        vy = velocities(:,:,2)
-
-        !===========================================================================
-        !> k + dk_x
-        allocate( W_dx (Num_wann))   
-        allocate( vx_dx(Num_wann, Num_wann), vy_dx(Num_wann, Num_wann))
-
-        k_dx = k+(/Origin_cell%Rua(1)*dx , Origin_cell%Rub(1)*dx , Origin_cell%Ruc(1)*dx/)/twopi
-
-        call ham_bulk_latticegauge(k_dx, Hamk_bulk)
-        UU=Hamk_bulk
-        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dx)
-        call velocity_latticegauge_simple(k_dx, UU, velocities)
-        vx_dx = velocities(:,:,1)
-        vy_dx = velocities(:,:,2)
-        !===========================================================================
-
-        !===========================================================================
-        !> k + dk_y
-        allocate( W_dy (Num_wann))
-        allocate( vx_dy(Num_wann, Num_wann), vy_dy(Num_wann, Num_wann))
-
-        k_dy = k+(/Origin_cell%Rua(2)*dy , Origin_cell%Rub(2)*dy , Origin_cell%Ruc(2)*dy/)/twopi
-
-        call ham_bulk_latticegauge(k_dy, Hamk_bulk)
-        UU=Hamk_bulk
-        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dy)
-        call velocity_latticegauge_simple(k_dy, UU, velocities)
-        vx_dy = velocities(:,:,1)
-        vy_dy = velocities(:,:,2)
-        !===========================================================================
-
-        sigma_xyy_k        = 0d0
-        sigma_yxx_k        = 0d0
-
-        do m= 1, Num_wann
-
-            !> calculate G for each band
-            G_xx=0d0; G_xy=0d0; G_yx=0d0; G_yy=0d0
-            G_yy_dx=0d0; G_xy_dy=0d0; G_xx_dy=0d0; G_yx_dx=0d0
-
-            do n= 1, Num_wann
-                if (ABS(W(m)-W(n)) < band_degeneracy_threshold) cycle
-                G_xx= G_xx+ 2.d0*real(vx(m, n)*vx(n, m)/((W(m)-W(n))**3))
-                G_xy= G_xy+ 2.d0*real(vx(m, n)*vy(n, m)/((W(m)-W(n))**3))
-                G_yx= G_yx+ 2.d0*real(vy(m, n)*vx(n, m)/((W(m)-W(n))**3))
-                G_yy= G_yy+ 2.d0*real(vy(m, n)*vy(n, m)/((W(m)-W(n))**3))
-
-                G_yy_dx= G_yy_dx + 2.d0*real( vy_dx(n, m)*vy_dx(m, n) )/(W_dx(m) - W_dx(n))**3
-                G_yx_dx= G_yx_dx + 2.d0*real( vy_dx(n, m)*vx_dx(m, n) )/(W_dx(m) - W_dx(n))**3
-                
-                G_xy_dy= G_xy_dy + 2.d0*real( vx_dy(n, m)*vy_dy(m, n) )/(W_dy(m) - W_dy(n))**3
-                G_xx_dy= G_xx_dy + 2.d0*real( vx_dy(n, m)*vx_dy(m, n) )/(W_dy(m) - W_dy(n))**3
-            enddo ! n
-
-            !> consider the Fermi-distribution according to the brodening Earc_eta
-            do ieta=1, NumberofEta
-                do ie=1, OmegaNum
-                    mu = energy(ie)
-                    Fermi= 1d0/(Exp((W(m)-mu)/Eta_array(ieta))+1d0)
-                    
-                    sigma_xyy_k(ie,ieta)= sigma_xyy_k(ie,ieta) &
-                        - ((G_yy_dx - G_yy)/dx - (G_xy_dy - G_xy)/dy)*Fermi
-                    sigma_yxx_k(ie,ieta)= sigma_yxx_k(ie,ieta) &
-                        - ((G_xx_dy - G_xx)/dy - (G_yx_dx - G_yx)/dx)*Fermi
-                enddo ! ie
-            enddo ! ieta
-        enddo ! m
-
-        deallocate(vx, vy, Hamk_bulk, Amat, UU)
-        deallocate(W_dx, W_dy, vx_dx, vx_dy, vy_dx, vy_dy)
-        return
-    end subroutine Lambda_abc_dG
-
-
-    subroutine sigma_ISOAHC_single_k(k, energy, Eta_array, sigma_xyy_k, sigma_yxx_k)
-
+    subroutine sigma_ISOAHC_single_k(k_in, sigma_xyy_k, sigma_yxx_k)
         implicit none
     
-        real(dp), intent(in)  :: k(3)
-        real(dp), intent(in)  :: energy(OmegaNum)
-        real(dp), intent(in)  :: Eta_array(NumberofEta)
-        real(dp), intent(out) :: sigma_xyy_k(OmegaNum, NumberofEta)
-        real(dp), intent(out) :: sigma_yxx_k(OmegaNum, NumberofEta)
+        real(dp), intent(in)  :: k_in(3)
+        real(dp), intent(out) :: sigma_xyy_k(OmegaNum, Eta_number)
+        real(dp), intent(out) :: sigma_yxx_k(OmegaNum, Eta_number)
     
         ! eigen value of H
         real(dp),    allocatable :: W(:)
@@ -270,38 +123,36 @@ contains
         UU= 0d0
     
         ! calculation bulk hamiltonian by a direct Fourier transformation of HmnR
-        call ham_bulk_latticegauge(k, Hamk_bulk)
+        call ham_bulk_latticegauge(k_in, Hamk_bulk)
     
         !> diagonalization by call zheev in lapack
         UU=Hamk_bulk
         call eigensystem_c( 'V', 'U', Num_wann, UU, W)
     
-        call velocity_latticegauge_simple(k, UU, velocities)
+        call velocity_latticegauge_simple(k_in, UU, velocities)
     
-        call Lambda_abc_df(k, energy, W, velocities, Eta_array, sigma_xyy_k, sigma_yxx_k)
+        call Lambda_abc_df(W, velocities, sigma_xyy_k, sigma_yxx_k)
     
-        deallocate( W, Hamk_bulk, UU, velocities)
-        return
     end subroutine sigma_ISOAHC_single_k
 
 
-    subroutine sigma_INPHC_single_k(k, energy, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
+    subroutine sigma_INPHC_single_k(k_in, Chi_xyyy_k, Chi_yxxx_k)
         use magnetic_moments
         use para
         implicit none
     
-        real(dp), intent(in)  :: k(3)
-        real(dp), intent(in)  :: energy(OmegaNum)
-        real(dp), intent(in)  :: Eta_array(NumberofEta)
-        real(dp), intent(out) :: Chi_xyyy_k(OmegaNum, NumberofEta, 2, 2) !> the third index: 1=spin, 2=orbital
-        real(dp), intent(out) :: Chi_yxxx_k(OmegaNum, NumberofEta, 2, 2)
+        real(dp), intent(in)  :: k_in(3)
+        real(dp), intent(out) :: Chi_xyyy_k(OmegaNum, Eta_number, 2, 2) !> the third index: 1=spin, 2=orbital
+        real(dp), intent(out) :: Chi_yxxx_k(OmegaNum, Eta_number, 2, 2)
     
         complex(dp), allocatable :: M_S(:, :, :) !> spin magnetic moments
         complex(dp), allocatable :: M_L(:, :, :) !> orbital magnetic moments
             
-        real(dp) :: k_dx(3)
-        real(dp) :: k_dy(3)
+        real(dp) :: k_dkx(3)
+        real(dp) :: k_dky(3)
         
+        real(dp), allocatable :: diffFermi(:)
+
         ! eigen value of H
         real(dp),    allocatable :: W(:)
         complex(dp), allocatable :: Hamk_bulk(:, :)
@@ -309,22 +160,24 @@ contains
         complex(dp), allocatable :: UU(:, :)
         complex(dp), allocatable :: UU_dag(:, :)
     
-        real(dp), allocatable :: W_dx(:)
-        real(dp), allocatable :: W_dy(:)
+        real(dp), allocatable :: W_dkx(:)
+        real(dp), allocatable :: W_dky(:)
     
-        complex(dp), allocatable :: sx(:, :), sy(:, :) , sz(:, :)
-        complex(dp), allocatable :: lx(:, :), ly(:, :) , lz(:, :)
+        complex(dp), allocatable :: sx(:, :), sy(:, :)
+        complex(dp), allocatable :: lx(:, :), ly(:, :)
         complex(dp), allocatable :: vx(:, :), vy(:, :)
         complex(dp), allocatable :: velocities(:,:,:)
     
-        complex(dp), allocatable :: vx_dx(:, :), vy_dx(:, :)  
-        complex(dp), allocatable :: vx_dy(:, :), vy_dy(:, :) 
+        complex(dp), allocatable :: vx_dkx(:, :), vy_dkx(:, :)  
+        complex(dp), allocatable :: vx_dky(:, :), vy_dky(:, :) 
     
         real(dp) :: Lambda_xyy_S, Lambda_yyy_S, Lambda_yxx_S, Lambda_xxx_S
         real(dp) :: Lambda_xyy_L, Lambda_yyy_L, Lambda_yxx_L, Lambda_xxx_L
-        real(dp) :: G_xx, G_xy, G_yx, G_yy, G_yy_dx, G_xy_dy, G_xx_dy, G_yx_dx
+        real(dp) :: G_xx, G_xy, G_yx, G_yy, G_yy_dkx, G_xy_dky, G_xx_dky, G_yx_dkx
         real(dp) :: dEnm, dEnm3, dEml, dEnl
         
+        allocate( diffFermi (OmegaNum))
+
         !===========================================================================
         !> original kpoints
         allocate( W (Num_wann))
@@ -335,14 +188,14 @@ contains
     
         allocate( velocities(Num_wann, Num_wann, 3))
         allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
-        allocate( sx(Num_wann, Num_wann), sy(Num_wann, Num_wann), sz(Num_wann, Num_wann))
-        allocate( lx(Num_wann, Num_wann), ly(Num_wann, Num_wann), lz(Num_wann, Num_wann))
+        allocate( sx(Num_wann, Num_wann), sy(Num_wann, Num_wann))
+        allocate( lx(Num_wann, Num_wann), ly(Num_wann, Num_wann))
     
-        call ham_bulk_latticegauge(k, Hamk_bulk)
+        call ham_bulk_latticegauge(k_in, Hamk_bulk)
         UU=Hamk_bulk
         call eigensystem_c( 'V', 'U', Num_wann, UU, W)
         UU_dag= conjg(transpose(UU))
-        call velocity_latticegauge_simple(k, UU, velocities)
+        call velocity_latticegauge_simple(k_in, UU, velocities)
         vx = velocities(:,:,1)
         vy = velocities(:,:,2)
     
@@ -359,45 +212,41 @@ contains
             call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,1)) 
             call mat_mul(Num_wann, M_S(:,:,2), UU, Amat) 
             call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,2))
-            ! call mat_mul(Num_wann, M_S(:,:,3), UU, Amat)
-            ! call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,3))
             sx = -0.5d0 * Lande_g_S * M_S(:,:,1)
             sy = -0.5d0 * Lande_g_S * M_S(:,:,2)
-            ! sz = -0.5d0 * Lande_g_S * M_S(:,:,3)
         endif
         if (include_m_orb) then
             call orbital_magnetic_moments(W, velocities, M_L)
             lx = Lande_g_L * M_L(:,:,1)
             ly = Lande_g_L * M_L(:,:,2)
-            ! lz = Lande_g_L * M_L(:,:,3) 
         endif    
     
         !> k + dk_x <===============================================================
-        allocate( W_dx (Num_wann))   
-        allocate( vx_dx(Num_wann, Num_wann), vy_dx(Num_wann, Num_wann))
+        allocate( W_dkx (Num_wann))   
+        allocate( vx_dkx(Num_wann, Num_wann), vy_dkx(Num_wann, Num_wann))
     
-        k_dx = k+(/Origin_cell%Rua(1)*dx , Origin_cell%Rub(1)*dx , Origin_cell%Ruc(1)*dx/)/twopi
+        k_dkx = k_in+(/Origin_cell%Rua(1)*dkx , Origin_cell%Rub(1)*dkx , Origin_cell%Ruc(1)*dkx/)/twopi
     
-        call ham_bulk_latticegauge(k_dx, Hamk_bulk)
+        call ham_bulk_latticegauge(k_dkx, Hamk_bulk)
         UU=Hamk_bulk
-        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dx)
-        call velocity_latticegauge_simple(k_dx, UU, velocities)
-        vx_dx = velocities(:,:,1)
-        vy_dx = velocities(:,:,2)
+        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dkx)
+        call velocity_latticegauge_simple(k_dkx, UU, velocities)
+        vx_dkx = velocities(:,:,1)
+        vy_dkx = velocities(:,:,2)
         !===========================================================================
     
         !> k + dk_y <===============================================================
-        allocate( W_dy (Num_wann))
-        allocate( vx_dy(Num_wann, Num_wann), vy_dy(Num_wann, Num_wann))
+        allocate( W_dky (Num_wann))
+        allocate( vx_dky(Num_wann, Num_wann), vy_dky(Num_wann, Num_wann))
     
-        k_dy = k+(/Origin_cell%Rua(2)*dy , Origin_cell%Rub(2)*dy , Origin_cell%Ruc(2)*dy/)/twopi
+        k_dky = k_in+(/Origin_cell%Rua(2)*dky , Origin_cell%Rub(2)*dky , Origin_cell%Ruc(2)*dky/)/twopi
     
-        call ham_bulk_latticegauge(k_dy, Hamk_bulk)
+        call ham_bulk_latticegauge(k_dky, Hamk_bulk)
         UU=Hamk_bulk
-        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dy)
-        call velocity_latticegauge_simple(k_dy, UU, velocities)
-        vx_dy = velocities(:,:,1)
-        vy_dy = velocities(:,:,2)
+        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dky)
+        call velocity_latticegauge_simple(k_dky, UU, velocities)
+        vx_dky = velocities(:,:,1)
+        vy_dky = velocities(:,:,2)
         !===========================================================================
     
         Chi_xyyy_k = 0d0
@@ -409,10 +258,10 @@ contains
             G_xy= 0d0
             G_yx= 0d0
             G_yy= 0d0
-            G_yy_dx= 0d0 
-            G_xy_dy= 0d0 
-            G_xx_dy= 0d0 
-            G_yx_dx= 0d0        
+            G_yy_dkx= 0d0 
+            G_xy_dky= 0d0 
+            G_xx_dky= 0d0 
+            G_yx_dkx= 0d0        
             Lambda_xyy_S = 0d0
             Lambda_yyy_S = 0d0
             Lambda_yxx_S = 0d0
@@ -432,11 +281,11 @@ contains
                 G_yx= G_yx+ 2.d0*real( vy(n, m)*vx(m, n) )/dEnm3
                 G_yy= G_yy+ 2.d0*real( vy(n, m)*vy(m, n) )/dEnm3
     
-                G_yy_dx= G_yy_dx + 2.d0*real( vy_dx(n, m)*vy_dx(m, n) )/(W_dx(n) - W_dx(m))**3
-                G_yx_dx= G_yx_dx + 2.d0*real( vy_dx(n, m)*vx_dx(m, n) )/(W_dx(n) - W_dx(m))**3
+                G_yy_dkx= G_yy_dkx + 2.d0*real( vy_dkx(n, m)*vy_dkx(m, n) )/(W_dkx(n) - W_dkx(m))**3
+                G_yx_dkx= G_yx_dkx + 2.d0*real( vy_dkx(n, m)*vx_dkx(m, n) )/(W_dkx(n) - W_dkx(m))**3
                 
-                G_xy_dy= G_xy_dy + 2.d0*real( vx_dy(n, m)*vy_dy(m, n) )/(W_dy(n) - W_dy(m))**3
-                G_xx_dy= G_xx_dy + 2.d0*real( vx_dy(n, m)*vx_dy(m, n) )/(W_dy(n) - W_dy(m))**3
+                G_xy_dky= G_xy_dky + 2.d0*real( vx_dky(n, m)*vy_dky(m, n) )/(W_dky(n) - W_dky(m))**3
+                G_xx_dky= G_xx_dky + 2.d0*real( vx_dky(n, m)*vx_dky(m, n) )/(W_dky(n) - W_dky(m))**3
     
                 if (include_m_spin) then
                     Lambda_xyy_S = Lambda_xyy_S + 6.d0* real( vx(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
@@ -488,52 +337,39 @@ contains
     
             enddo ! m
 
-            do ieta=1, NumberofEta
-                do ie=1, OmegaNum
-                    mu = energy(ie)
+            do ieta=1, Eta_number
+                !> this format is very important! prevent NaN error
+                diffFermi = -1d0 / (Exp((W(n) - energy)/Eta_array(ieta))+1d0) / (Exp(-(W(n) - energy)/Eta_array(ieta))+1d0) / Eta_array(ieta)
 
-                    !> very important! prevent NaN error
-                    if ((W(n)-mu)/Eta_array(ieta)<50) then
-                        diffFermi= Exp((W(n)-mu)/Eta_array(ieta))/(Exp((W(n)-mu)/Eta_array(ieta))+1d0)**2 /Eta_array(ieta)
-                    else
-                        diffFermi= 0.d0
-                    endif
+                if (include_m_spin) then
+                    Chi_xyyy_k(:,ieta, 1, 1) = Chi_xyyy_k(:,ieta, 1, 1) + real( (vx(n,n)*Lambda_yyy_S - vy(n,n)*Lambda_xyy_S) ) * diffFermi
+                    Chi_xyyy_k(:,ieta, 1, 2) = Chi_xyyy_k(:,ieta, 1, 2) + real( ((G_yy_dkx - G_yy)/dkx - (G_xy_dky - G_xy)/dky)*sy(n,n) ) * diffFermi
 
-                    if (include_m_spin) then
-                        Chi_xyyy_k(ie,ieta, 1, 1) = Chi_xyyy_k(ie,ieta, 1, 1) + real( (vx(n,n)*Lambda_yyy_S - vy(n,n)*Lambda_xyy_S) ) * diffFermi
-                        Chi_xyyy_k(ie,ieta, 1, 2) = Chi_xyyy_k(ie,ieta, 1, 2) + real( ((G_yy_dx - G_yy)/dx - (G_xy_dy - G_xy)/dy)*sy(n,n) ) * diffFermi
-    
-                        Chi_yxxx_k(ie,ieta, 1, 1) = Chi_yxxx_k(ie,ieta, 1, 1) + real( (vy(n,n)*Lambda_xxx_S - vx(n,n)*Lambda_yxx_S) ) * diffFermi
-                        Chi_yxxx_k(ie,ieta, 1, 2) = Chi_yxxx_k(ie,ieta, 1, 2) + real( ((G_xx_dy - G_xx)/dy - (G_yx_dx - G_yx)/dx)*sx(n,n) ) * diffFermi
-                    endif
-                    if (include_m_orb) then
-                        Chi_xyyy_k(ie,ieta, 2, 1) = Chi_xyyy_k(ie,ieta, 2, 1) + real( (vx(n,n)*Lambda_yyy_L - vy(n,n)*Lambda_xyy_L) ) * diffFermi
-                        Chi_xyyy_k(ie,ieta, 2, 2) = Chi_xyyy_k(ie,ieta, 2, 2) + real( ((G_yy_dx - G_yy)/dx - (G_xy_dy - G_xy)/dy)*ly(n,n) ) * diffFermi
-    
-                        Chi_yxxx_k(ie,ieta, 2, 1) = Chi_yxxx_k(ie,ieta, 2, 1) + real( (vy(n,n)*Lambda_xxx_L - vx(n,n)*Lambda_yxx_L) ) * diffFermi
-                        Chi_yxxx_k(ie,ieta, 2, 2) = Chi_yxxx_k(ie,ieta, 2, 2) + real( ((G_xx_dy - G_xx)/dy - (G_yx_dx - G_yx)/dx)*lx(n,n) ) * diffFermi
-                    endif
-                enddo ! ie
+                    Chi_yxxx_k(:,ieta, 1, 1) = Chi_yxxx_k(:,ieta, 1, 1) + real( (vy(n,n)*Lambda_xxx_S - vx(n,n)*Lambda_yxx_S) ) * diffFermi
+                    Chi_yxxx_k(:,ieta, 1, 2) = Chi_yxxx_k(:,ieta, 1, 2) + real( ((G_xx_dky - G_xx)/dky - (G_yx_dkx - G_yx)/dkx)*sx(n,n) ) * diffFermi
+                endif
+                if (include_m_orb) then
+                    Chi_xyyy_k(:,ieta, 2, 1) = Chi_xyyy_k(:,ieta, 2, 1) + real( (vx(n,n)*Lambda_yyy_L - vy(n,n)*Lambda_xyy_L) ) * diffFermi
+                    Chi_xyyy_k(:,ieta, 2, 2) = Chi_xyyy_k(:,ieta, 2, 2) + real( ((G_yy_dkx - G_yy)/dkx - (G_xy_dky - G_xy)/dky)*ly(n,n) ) * diffFermi
+
+                    Chi_yxxx_k(:,ieta, 2, 1) = Chi_yxxx_k(:,ieta, 2, 1) + real( (vy(n,n)*Lambda_xxx_L - vx(n,n)*Lambda_yxx_L) ) * diffFermi
+                    Chi_yxxx_k(:,ieta, 2, 2) = Chi_yxxx_k(:,ieta, 2, 2) + real( ((G_xx_dky - G_xx)/dky - (G_yx_dkx - G_yx)/dkx)*lx(n,n) ) * diffFermi
+                endif
             enddo ! ieta
         enddo ! n
     
-        deallocate(W, vx, vy, Hamk_bulk, Amat, UU, UU_dag, velocities)
-        deallocate(W_dx, W_dy, vx_dx, vx_dy, vy_dx, vy_dy)
-        deallocate(sx, sy, sz, lx, ly, lz)
-        deallocate(M_S, M_L)
-        return
     end subroutine sigma_INPHC_single_k
 
 
-    subroutine drude_weight_single_k(k, energy, Eta_array, drude_k)
+    subroutine drude_weight_single_k(k_in, drude_k)
         use para
         implicit none
     
-        real(dp), intent(in)  :: k(3)
-        real(dp), intent(in)  :: energy(OmegaNum)
-        real(dp), intent(in)  :: Eta_array(NumberofEta)
-        real(dp), intent(out) :: drude_k(OmegaNum, NumberofEta, 2)
+        real(dp), intent(in)  :: k_in(3)
+        real(dp), intent(out) :: drude_k(OmegaNum, Eta_number, 2)
                 
+        real(dp),    allocatable :: diffFermi(:)
+
         ! eigen value of H
         real(dp),    allocatable :: W(:)
         complex(dp), allocatable :: Hamk_bulk(:, :)
@@ -542,16 +378,17 @@ contains
         complex(dp), allocatable :: velocities(:,:,:)
         complex(dp), allocatable :: vx(:, :), vy(:, :)
 
+        allocate( diffFermi (OmegaNum))
         allocate( W         (Num_wann))
         allocate( Hamk_bulk (Num_wann, Num_wann))
         allocate( UU        (Num_wann, Num_wann))
         allocate( velocities(Num_wann, Num_wann, 3))
         allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
     
-        call ham_bulk_latticegauge(k, Hamk_bulk)
+        call ham_bulk_latticegauge(k_in, Hamk_bulk)
         UU=Hamk_bulk
         call eigensystem_c( 'V', 'U', Num_wann, UU, W)
-        call velocity_latticegauge_simple(k, UU, velocities)
+        call velocity_latticegauge_simple(k_in, UU, velocities)
         vx = velocities(:,:,1)
         vy = velocities(:,:,2)
     
@@ -559,28 +396,82 @@ contains
     
         do n= 1, Num_wann
             if (W(n)<OmegaMin- 2.d-2 .or. W(n)>OmegaMax+ 2.d-2) cycle
-            do ieta=1, NumberofEta
-                do ie=1, OmegaNum
-                    mu = energy(ie)
+            do ieta=1, Eta_number
+                !> this format is very important! prevent NaN error
+                diffFermi = -1d0 / (Exp((W(n) - energy)/Eta_array(ieta))+1d0) / (Exp(-(W(n) - energy)/Eta_array(ieta))+1d0) / Eta_array(ieta)
 
-                    !> very important! prevent NaN error
-                    if ((W(n)-mu)/Eta_array(ieta)<50) then
-                        diffFermi= Exp((W(n)-mu)/Eta_array(ieta))/(Exp((W(n)-mu)/Eta_array(ieta))+1d0)**2 /Eta_array(ieta)
-                    else
-                        diffFermi= 0.d0
-                    endif
-
-                    drude_k(ie, ieta, 1) = drude_k(ie, ieta, 1) + real(vx(n,n))**2 *diffFermi
-                    drude_k(ie, ieta, 2) = drude_k(ie, ieta, 2) + real(vy(n,n))**2 *diffFermi
-                enddo ! ie
+                drude_k(:, ieta, 1) = drude_k(:, ieta, 1) + real(vx(n,n))**2 *diffFermi
+                drude_k(:, ieta, 2) = drude_k(:, ieta, 2) + real(vy(n,n))**2 *diffFermi
             enddo ! ieta
         enddo ! n
     
-        deallocate(W, vx, vy, Hamk_bulk, UU, velocities)
-        return
     end subroutine drude_weight_single_k
 
 end module
+
+subroutine velocity_latticegauge_simple(k_in, UU, velocities) !> dH_dk, without 1/hbar
+    use para, only: dp, irvec, crvec, HmnR, pi2zi, ndegen, Nrpts, Num_wann, zi
+    implicit none
+
+    real(dp),    intent(in)  :: k_in(3)
+    complex(dp), intent(in)  :: UU(Num_wann, Num_wann)
+    complex(dp), intent(out) :: velocities(Num_wann, Num_wann, 3)
+
+    real(dp):: kdotr
+    integer :: iR
+    complex(dp), allocatable :: Amat(:, :), UU_dag(:,:)
+    allocate( Amat(Num_wann, Num_wann), UU_dag(Num_wann, Num_wann))
+
+    velocities= 0d0
+    do iR= 1, Nrpts
+        kdotr= k_in(1)*irvec(1,iR) + k_in(2)*irvec(2,iR) + k_in(3)*irvec(3,iR)
+        velocities(:,:,1)= velocities(:,:,1) + zi*crvec(1, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+        velocities(:,:,2)= velocities(:,:,2) + zi*crvec(2, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+        velocities(:,:,3)= velocities(:,:,3) + zi*crvec(3, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+    enddo ! iR
+
+    UU_dag= conjg(transpose(UU))
+    !> unitility rotate velocity
+    call mat_mul(Num_wann, velocities(:,:,1), UU, Amat)
+    call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,1))
+    call mat_mul(Num_wann, velocities(:,:,2), UU, Amat)
+    call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,2))
+    call mat_mul(Num_wann, velocities(:,:,3), UU, Amat)
+    call mat_mul(Num_wann, UU_dag, Amat, velocities(:,:,3))
+
+end subroutine velocity_latticegauge_simple
+
+subroutine ik_to_kpoint(ik,k)
+    use para, only: dp, Nk1, Nk2, Nk3, K3D_start_cube, K3D_vec1_cube, K3D_vec2_cube, K3D_vec3_cube
+    implicit none
+    integer(8),intent(in)  :: ik
+    real(dp),  intent(out) :: k(3)
+    integer(8)             :: ikx, iky, ikz
+
+    ikx= (ik-1)/(Nk2*Nk3)+1
+    iky= ((ik-1-(ikx-1)*Nk2*Nk3)/Nk3)+1
+    ikz= (ik-(iky-1)*Nk3- (ikx-1)*Nk2*Nk3)
+    k= K3D_start_cube + K3D_vec1_cube*(ikx-1)/dble(Nk1) + K3D_vec2_cube*(iky-1)/dble(Nk2) + K3D_vec3_cube*(ikz-1)/dble(Nk3)  
+end subroutine ik_to_kpoint
+
+
+subroutine Fermi_energy_list(energy) 
+    !> return Fermi energy in Hatree energy, not eV
+    use para, only: dp, OmegaNum, OmegaMin, OmegaMax
+    implicit none
+    real(dp),  intent(inout) :: energy(OmegaNum)
+    integer :: ie
+
+    energy = 0d0
+    do ie=1, OmegaNum
+        if (OmegaNum>1) then
+            energy(ie)= OmegaMin+ (OmegaMax-OmegaMin)* (ie- 1d0)/(OmegaNum- 1d0)
+        else
+            energy= OmegaMin
+        endif
+    enddo ! ie
+end subroutine Fermi_energy_list
+
 
 subroutine sigma_ISOAHC
 
@@ -601,12 +492,7 @@ subroutine sigma_ISOAHC
     use nonlinear_transport
     implicit none
 
-    real(dp), allocatable :: Eta_array(:)
-
-    real(dp) :: k(3)
-
-    !> conductivity  dim = OmegaNum
-    real(dp), allocatable :: energy(:)
+    real(dp), parameter :: SOAHC_unit_factor =  Echarge**3/hbar/Hartree2J
 
     real(dp), allocatable :: sigma_xyy    (:,:)
     real(dp), allocatable :: sigma_yxx    (:,:)
@@ -615,30 +501,20 @@ subroutine sigma_ISOAHC
     real(dp), allocatable :: sigma_xyy_mpi(:,:)
     real(dp), allocatable :: sigma_yxx_mpi(:,:)
 
-    allocate( energy(OmegaNum))
-
-    !> temperature, Eta = 1/k_B/T
-    allocate( Eta_array(NumberofEta) )
     Eta_array(1) = Eta_Arc !> from wt.in
-    Eta_array(2:NumberofEta) = Eta_array_all(1:NumberofEta-1)
+    Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
 
-    allocate( sigma_xyy        (OmegaNum, NumberofEta))
-    allocate( sigma_yxx        (OmegaNum, NumberofEta))
-    allocate( sigma_xyy_k      (OmegaNum, NumberofEta))
-    allocate( sigma_yxx_k      (OmegaNum, NumberofEta))
-    allocate( sigma_xyy_mpi    (OmegaNum, NumberofEta))
-    allocate( sigma_yxx_mpi    (OmegaNum, NumberofEta))
+    allocate( sigma_xyy        (OmegaNum, Eta_number))
+    allocate( sigma_yxx        (OmegaNum, Eta_number))
+    allocate( sigma_xyy_k      (OmegaNum, Eta_number))
+    allocate( sigma_yxx_k      (OmegaNum, Eta_number))
+    allocate( sigma_xyy_mpi    (OmegaNum, Eta_number))
+    allocate( sigma_yxx_mpi    (OmegaNum, Eta_number))
 
-    !> energy
-    do ie=1, OmegaNum
-        if (OmegaNum>1) then
-            energy(ie)= OmegaMin+ (OmegaMax-OmegaMin)* (ie-1d0)/dble(OmegaNum-1)
-        else
-            energy= OmegaMin
-        endif
-    enddo ! ie
+    allocate( energy(OmegaNum))
+    call Fermi_energy_list(energy)
 
-    knv3= Nk1*Nk2*Nk3
+    knv3= int8(Nk1)*Nk2*Nk3
 
     sigma_xyy_mpi    = 0.d0
     sigma_yxx_mpi    = 0.d0
@@ -652,23 +528,18 @@ subroutine sigma_ISOAHC
             time_start= time_end
         endif
 
-        ikx= (ik-1)/(Nk2*Nk3)+1
-        iky= ((ik-1-(ikx-1)*Nk2*Nk3)/Nk3)+1
-        ikz= (ik-(iky-1)*Nk3- (ikx-1)*Nk2*Nk3)
-        k= K3D_start_cube+ K3D_vec1_cube*(ikx-1)/dble(Nk1)  &
-            + K3D_vec2_cube*(iky-1)/dble(Nk2)  &
-            + K3D_vec3_cube*(ikz-1)/dble(Nk3)
+        call ik_to_kpoint(ik,k)
 
-        call sigma_ISOAHC_single_k(k, energy, Eta_array, sigma_xyy_k, sigma_yxx_k)
+        call sigma_ISOAHC_single_k(k, sigma_xyy_k, sigma_yxx_k)
 
         sigma_xyy_mpi = sigma_xyy_mpi + sigma_xyy_k
         sigma_yxx_mpi = sigma_yxx_mpi + sigma_yxx_k
     enddo ! ik
 
 #if defined (MPI)
+    call mpi_barrier(mpi_cmw,ierr)
     call mpi_allreduce(sigma_xyy_mpi,sigma_xyy,size(sigma_xyy),&
         mpi_dp,mpi_sum,mpi_cmw,ierr)
-
     call mpi_allreduce(sigma_yxx_mpi,sigma_yxx,size(sigma_yxx),&
         mpi_dp,mpi_sum,mpi_cmw,ierr)
 #endif
@@ -679,9 +550,9 @@ subroutine sigma_ISOAHC
 
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
-        do ieta=1, NumberofEta
-            write(etaname, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
-            write(ahcfilename, '(7a)')'sigma_ISOAHC_eta', trim(adjustl(etaname)), 'meV.dat'
+        do ieta=1, Eta_number
+            write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
+            write(ahcfilename, '(7a)')'sigma_ISOAHC_eta', trim(adjustl(Eta_name)), 'meV.dat'
             open(unit=outfileindex, file=ahcfilename)
             write(outfileindex, '("#",a)')' Intrinsic 2nd anomalous hall conductivity, in unit of A.V^-2 for 3D cases.'
             write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
@@ -694,10 +565,6 @@ subroutine sigma_ISOAHC
         enddo
     endif
 
-    deallocate( energy, Eta_array)
-    deallocate( sigma_xyy, sigma_yxx, sigma_xyy_mpi, sigma_yxx_mpi )
-
-    return
 end subroutine sigma_ISOAHC
 
 
@@ -716,11 +583,7 @@ subroutine sigma_INPHC
     use nonlinear_transport
     implicit none
 
-    real(dp) :: k(3)
-
-    real(dp), allocatable :: Eta_array(:)
-
-    real(dp), allocatable :: energy(:)  !> Fermi energy, dim= OmegaNum
+    real(dp), parameter :: INPHC_unit_factor = -Echarge**3/hbar/Hartree2J * mu_B
 
     real(dp), allocatable :: Chi_xyyy_k         (:,:,:,:)
     real(dp), allocatable :: Chi_yxxx_k         (:,:,:,:)
@@ -729,35 +592,25 @@ subroutine sigma_INPHC
     real(dp), allocatable :: Chi_xyyy_tensor_mpi(:,:,:,:)
     real(dp), allocatable :: Chi_yxxx_tensor_mpi(:,:,:,:)
 
-    allocate( energy (OmegaNum))
-
-    !> temperature, Eta = 1/k_B/T
-    allocate( Eta_array(NumberofEta) )
     Eta_array(1) = Eta_Arc !> from wt.in
-    Eta_array(2:NumberofEta) = Eta_array_all(1:NumberofEta-1)
+    Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
 
-    allocate( Chi_xyyy_k         (OmegaNum, NumberofEta,2,2))
-    allocate( Chi_yxxx_k         (OmegaNum, NumberofEta,2,2))
-    allocate( Chi_xyyy_tensor    (OmegaNum, NumberofEta,2,2))
-    allocate( Chi_yxxx_tensor    (OmegaNum, NumberofEta,2,2))
-    allocate( Chi_xyyy_tensor_mpi(OmegaNum, NumberofEta,2,2))
-    allocate( Chi_yxxx_tensor_mpi(OmegaNum, NumberofEta,2,2))
+    allocate( Chi_xyyy_k         (OmegaNum, Eta_number,2,2))
+    allocate( Chi_yxxx_k         (OmegaNum, Eta_number,2,2))
+    allocate( Chi_xyyy_tensor    (OmegaNum, Eta_number,2,2))
+    allocate( Chi_yxxx_tensor    (OmegaNum, Eta_number,2,2))
+    allocate( Chi_xyyy_tensor_mpi(OmegaNum, Eta_number,2,2))
+    allocate( Chi_yxxx_tensor_mpi(OmegaNum, Eta_number,2,2))
 
     Chi_xyyy_tensor     = 0d0
     Chi_yxxx_tensor     = 0d0
     Chi_xyyy_tensor_mpi = 0d0
     Chi_yxxx_tensor_mpi = 0d0
 
-    !> Fermi energy in Hatree energy, not eV
-    do ie=1, OmegaNum
-        if (OmegaNum>1) then
-            energy(ie)= OmegaMin+ (OmegaMax-OmegaMin)* (ie- 1d0)/dble(OmegaNum- 1)
-        else
-            energy= OmegaMin
-        endif
-    enddo ! ie
+    allocate( energy(OmegaNum))
+    call Fermi_energy_list(energy)
 
-    knv3= Nk1*Nk2*Nk3
+    knv3= int8(Nk1)*Nk2*Nk3
 
     call now(time_start)
     do ik= 1+ cpuid, knv3, num_cpu
@@ -768,21 +621,16 @@ subroutine sigma_INPHC
             time_start= time_end
         endif
 
-        ikx= (ik-1)/(Nk2*Nk3)+1
-        iky= ((ik-1-(ikx-1)*Nk2*Nk3)/Nk3)+1
-        ikz= (ik-(iky-1)*Nk3- (ikx-1)*Nk2*Nk3)
-        k= K3D_start_cube  &
-            + K3D_vec1_cube*(ikx-1)/dble(Nk1)  &
-            + K3D_vec2_cube*(iky-1)/dble(Nk2)  &
-            + K3D_vec3_cube*(ikz-1)/dble(Nk3)
+        call ik_to_kpoint(ik,k)
 
-        call sigma_INPHC_single_k(k, energy, Eta_array, Chi_xyyy_k, Chi_yxxx_k)
+        call sigma_INPHC_single_k(k, Chi_xyyy_k, Chi_yxxx_k)
 
         Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi + Chi_xyyy_k
         Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi + Chi_yxxx_k
     enddo ! ik
 
 #if defined (MPI)
+    call mpi_barrier(mpi_cmw,ierr)
     call mpi_reduce(Chi_xyyy_tensor_mpi, Chi_xyyy_tensor, size(Chi_xyyy_tensor), mpi_dp,mpi_sum, 0, mpi_cmw,ierr)
     call mpi_reduce(Chi_yxxx_tensor_mpi, Chi_yxxx_tensor, size(Chi_yxxx_tensor), mpi_dp,mpi_sum, 0, mpi_cmw,ierr)
 #endif
@@ -792,11 +640,11 @@ subroutine sigma_INPHC
 
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
-        do ieta=1, NumberofEta
-            write(etaname, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
+        do ieta=1, Eta_number
+            write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
 
             if (include_m_spin) then
-                write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(etaname)), 'meV.dat'
+                write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
                 write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
                 write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
@@ -811,7 +659,7 @@ subroutine sigma_INPHC
             endif
 
             if (include_m_orb ) then
-                write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(etaname)), 'meV.dat'
+                write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
                 write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
                 write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
@@ -827,12 +675,8 @@ subroutine sigma_INPHC
         enddo
     endif
 
-    deallocate(energy, Eta_array)
-    deallocate(Chi_xyyy_k, Chi_yxxx_k, Chi_xyyy_tensor, Chi_xyyy_tensor_mpi, Chi_yxxx_tensor, Chi_yxxx_tensor_mpi)
-
-    return
-
 end subroutine sigma_INPHC
+
 
 subroutine drude_weight
 
@@ -840,37 +684,22 @@ subroutine drude_weight
     use para
     use nonlinear_transport
     implicit none
-
-    real(dp) :: k(3)
-    
-    real(dp), allocatable :: Eta_array(:)
-    real(dp), allocatable :: energy(:) !> Fermi energy, dim= OmegaNum
     
     real(dp), allocatable :: drude      (:,:,:)
     real(dp), allocatable :: drude_mpi  (:,:,:)
     real(dp), allocatable :: drude_k    (:,:,:)
 
-    allocate( energy(OmegaNum))
+    allocate( drude    (OmegaNum, Eta_number,2))
+    allocate( drude_mpi(OmegaNum, Eta_number,2))
+    allocate( drude_k  (OmegaNum, Eta_number,2))
 
-    allocate( drude    (OmegaNum, NumberofEta,2))
-    allocate( drude_mpi(OmegaNum, NumberofEta,2))
-    allocate( drude_k  (OmegaNum, NumberofEta,2))
-
-    ! !> temperature, Eta = 1/k_B/T
-    allocate( Eta_array (NumberofEta) )
     Eta_array(1) = Eta_Arc !> from wt.in
-    Eta_array(2:NumberofEta) = Eta_array_all(1:NumberofEta-1)
+    Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
 
-    ! !> Fermi energy in Hatree energy, not eV
-    do ie=1, OmegaNum
-        if (OmegaNum>1) then
-            energy(ie)= OmegaMin+ (OmegaMax-OmegaMin)* (ie- 1d0)/dble(OmegaNum- 1)
-        else
-            energy= OmegaMin
-        endif
-    enddo ! ie
+    allocate( energy(OmegaNum))
+    call Fermi_energy_list(energy)
 
-    knv3= Nk1*Nk2*Nk3
+    knv3= int8(Nk1)*Nk2*Nk3
     drude = 0d0
     drude_mpi = 0d0
 
@@ -883,20 +712,15 @@ subroutine drude_weight
             time_start= time_end
         endif
 
-        ikx= (ik-1)/(Nk2*Nk3)+1
-        iky= ((ik-1-(ikx-1)*Nk2*Nk3)/Nk3)+1
-        ikz= (ik-(iky-1)*Nk3- (ikx-1)*Nk2*Nk3)
-        k= K3D_start_cube  &
-            + K3D_vec1_cube*(ikx-1)/dble(Nk1)  &
-            + K3D_vec2_cube*(iky-1)/dble(Nk2)  &
-            + K3D_vec3_cube*(ikz-1)/dble(Nk3)
+        call ik_to_kpoint(ik,k)
 
-        call drude_weight_single_k(k, energy, Eta_array, drude_k)
+        call drude_weight_single_k(k, drude_k)
 
         drude_mpi = drude_mpi + drude_k
     enddo ! ik
 
 #if defined (MPI)
+    call mpi_barrier(mpi_cmw,ierr)
     call mpi_reduce(drude_mpi, drude, size(drude_mpi), mpi_dp, mpi_sum, 0, mpi_cmw, ierr)
     call mpi_reduce(drude_mpi, drude, size(drude_mpi), mpi_dp, mpi_sum, 0, mpi_cmw, ierr)
 #endif
@@ -905,10 +729,10 @@ subroutine drude_weight
 
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
-        do ieta=1, NumberofEta
-            write(etaname, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
+        do ieta=1, Eta_number
+            write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
 
-            write(ahcfilename, '(7a)')'drude_weight_eta', trim(adjustl(etaname)), 'meV.dat'
+            write(ahcfilename, '(7a)')'drude_weight_eta', trim(adjustl(Eta_name)), 'meV.dat'
             open(unit=outfileindex, file=ahcfilename)
             write(outfileindex, '("#",a)')' Drude weight, in unit of S/m/(relaxation time)'
             write(outfileindex, '("#",a)')'  '
@@ -921,8 +745,4 @@ subroutine drude_weight
         enddo
     endif
 
-    deallocate(energy, Eta_array)
-    deallocate(drude, drude_mpi, drude_k)
-    return
 end subroutine drude_weight
-

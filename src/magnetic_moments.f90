@@ -1,6 +1,5 @@
 module magnetic_moments
     use para, only: dp, zi, mu_B, eV2Hartree, Num_wann, Echarge, hbar, Bohr_radius, band_degeneracy_threshold
-    ! use nonlinear_transport, only: band_degeneracy_threshold
     implicit none
 
     !> Lande g-factor

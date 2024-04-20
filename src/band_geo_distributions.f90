@@ -91,14 +91,15 @@ end subroutine
 #endif
 
 
-subroutine ISOAHC_dist_single_k_Ef(k, props)
+subroutine ISOAHC_dist_single_k_Ef(k_in, props)
     
     use nonlinear_transport
     use para
     implicit none
    
-    real(dp), intent(in)  :: k(3)
+    real(dp), intent(in)  :: k_in(3)
     real(dp), intent(out) :: props(6)
+    real(dp) :: diffFermi
 
     ! eigen value of H
     real(dp),    allocatable :: W(:)
@@ -121,11 +122,11 @@ subroutine ISOAHC_dist_single_k_Ef(k, props)
     allocate( velocities(Num_wann, Num_wann, 3))
     allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
 
-    call ham_bulk_latticegauge(k, Hamk_bulk)
+    call ham_bulk_latticegauge(k_in, Hamk_bulk)
     UU=Hamk_bulk
     call eigensystem_c( 'V', 'U', Num_wann, UU, W)
     UU_dag= conjg(transpose(UU))
-    call velocity_latticegauge_simple(k, UU, velocities)
+    call velocity_latticegauge_simple(k_in, UU, velocities)
     vx = velocities(:,:,1)
     vy = velocities(:,:,2)
 
@@ -163,15 +164,16 @@ subroutine ISOAHC_dist_single_k_Ef(k, props)
 end subroutine
 
 
-subroutine INPHC_dist_single_k_Ef(k, props)
+subroutine INPHC_dist_single_k_Ef(k_in, props)
 
     use nonlinear_transport
     use magnetic_moments
     use para
     implicit none
 
-    real(dp), intent(in)  :: k(3)
+    real(dp), intent(in)  :: k_in(3)
     real(dp), intent(out) :: props(6)
+    real(dp) :: diffFermi
 
     complex(dp), allocatable :: M_S(:, :, :) !> spin magnetic moments
     complex(dp), allocatable :: M_L(:, :, :) !> orbital magnetic moments
@@ -201,11 +203,11 @@ subroutine INPHC_dist_single_k_Ef(k, props)
     allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
     allocate( sx(Num_wann, Num_wann), sy(Num_wann, Num_wann), sz(Num_wann, Num_wann))
 
-    call ham_bulk_latticegauge(k, Hamk_bulk)
+    call ham_bulk_latticegauge(k_in, Hamk_bulk)
     UU=Hamk_bulk
     call eigensystem_c( 'V', 'U', Num_wann, UU, W)
     UU_dag= conjg(transpose(UU))
-    call velocity_latticegauge_simple(k, UU, velocities)
+    call velocity_latticegauge_simple(k_in, UU, velocities)
     vx = velocities(:,:,1)
     vy = velocities(:,:,2)
 

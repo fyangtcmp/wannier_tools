@@ -774,30 +774,30 @@
         if(cpuid.eq.0)write(stdout, *)'End of calculating the spin texture for surface'
      endif
 
-     !> calculate the intrinsic second-order Hall conductivity
-     if (sigma_SOAHC_int_calc)then
-        if(cpuid.eq.0)write(stdout, *)' '
-        if(cpuid.eq.0)write(stdout, *)
-        call now(time_start)
-        call sigma_ISOAHC
-        call now(time_end)
-        call print_time_cost(time_start, time_end, 'sigma_SOAHC_int')
-        if(cpuid.eq.0)write(stdout, *)
-     endif
+      !> calculate the intrinsic second-order Hall conductivity
+      if (sigma_SOAHC_int_calc)then
+         if(cpuid.eq.0)write(stdout, *)' '
+         if(cpuid.eq.0)write(stdout, *)
+         call now(time_start)
+         call sigma_ISOAHC
+         call now(time_end)
+         call print_time_cost(time_start, time_end, 'sigma_SOAHC_int')
+         if(cpuid.eq.0)write(stdout, *)
+      endif
 
      !> calculate the intrinsic nonlinear planar Hall conductivity
-     if (sigma_NPHC_int_calc)then
-        if(cpuid.eq.0)write(stdout, *)' '
-        if(cpuid.eq.0)write(stdout, *)
-        call now(time_start)
-        call sigma_INPHC
-        call now(time_end)
-        call print_time_cost(time_start, time_end, 'sigma_NPHC_int')
-        if(cpuid.eq.0)write(stdout, *)
-     endif
+      if (sigma_NPHC_int_calc)then
+         if(cpuid.eq.0)write(stdout, *)' '
+         if(cpuid.eq.0)write(stdout, *)
+         call now(time_start)
+         call sigma_INPHC
+         call now(time_end)
+         call print_time_cost(time_start, time_end, 'sigma_NPHC_int')
+         if(cpuid.eq.0)write(stdout, *)
+      endif
 
-     !> calculate the distributions of user defined band geometry properties
-     if (band_geo_props_kplane_calc)then
+      !> calculate the distributions of user defined band geometry properties
+      if (band_geo_props_kplane_calc)then
          if(cpuid.eq.0)write(stdout, *)' '
          if(cpuid.eq.0)write(stdout, *)
          call now(time_start)
@@ -805,9 +805,9 @@
          call now(time_end)
          call print_time_cost(time_start, time_end, 'band_geo_props_kplane')
          if(cpuid.eq.0)write(stdout, *)
-     endif
+      endif
 
-     if (drude_weight_calc)then
+      if (drude_weight_calc)then
          if(cpuid.eq.0)write(stdout, *)' '
          if(cpuid.eq.0)write(stdout, *)
          call now(time_start)
@@ -815,7 +815,17 @@
          call now(time_end)
          call print_time_cost(time_start, time_end, 'drude_weight')
          if(cpuid.eq.0)write(stdout, *)
-     endif
+      endif
+
+      if (sigma_TRAHC_calc)then
+         if(cpuid.eq.0)write(stdout, *)' '
+         if(cpuid.eq.0)write(stdout, *)
+         call now(time_start)
+         call sigma_TRAHC
+         call now(time_end)
+         call print_time_cost(time_start, time_end, 'sigma_TRAHC')
+         if(cpuid.eq.0)write(stdout, *)
+      endif
 
      call now(time_end)
 
