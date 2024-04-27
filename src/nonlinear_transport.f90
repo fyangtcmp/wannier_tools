@@ -32,20 +32,17 @@ module nonlinear_transport
     real(dp) :: dkx = 1d-5
     real(dp) :: dky = 1d-5
 
-    real(dp) :: lim=1d7
-
     !> local fine k-grids
     integer :: Nk_fine = 5
     integer :: knv3_fine, ikfine, ikfinex, ikfiney, ikfinez
 
-    !> to decide the number of k-points which will be implemented with local dense k-meshes
-    real(dp),allocatable :: k_fine_list(:,:)
-    integer, allocatable :: displacement(:)
-    integer              :: Nk_adaptive_mpi
-    integer, allocatable :: Nk_adaptive(:) ! Nk_adaptive on every cores
-    integer              :: Nk_adaptive_tol
-    integer, allocatable :: ik_adapt_list_mpi(:)
-    integer, allocatable :: ik_adapt_list    (:)
+    real(dp)  , allocatable :: k_fine_list(:,:)
+    integer   , allocatable :: displacement(:)
+    integer                 :: Nk_adapt_icore_mpi
+    integer   , allocatable :: Nk_adapt_icore(:) ! Nk_adaptive on every cores
+    integer                 :: Nk_adapt
+    integer(8), allocatable :: ik_adapt_list_mpi(:)
+    integer(8), allocatable :: ik_adapt_list    (:)
 
 contains
     subroutine Lambda_abc_df(W, velocities, sigma_xyy_k, sigma_yxx_k)
