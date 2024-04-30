@@ -23,7 +23,7 @@ module nonlinear_transport
     
     !> loop 
     integer(8) :: ie, ik, ik2, knv3
-    integer    :: n, m, l, ieta, ierr, icore
+    integer    :: n, m, l, ieta, ierr, icore, icut
 
     real(dp) :: k(3), kfine(3)
 
@@ -33,16 +33,15 @@ module nonlinear_transport
     real(dp) :: dky = 1d-5
 
     !> local fine k-grids
-    integer :: Nk_fine = 5
-    integer :: knv3_fine, ikfine, ikfinex, ikfiney, ikfinez
+    integer  :: Nk_fine = 5
+    integer  :: knv3_fine, ikfine, ikfinex, ikfiney, ikfinez
+    real(dp) , allocatable :: k_fine_list(:,:)
 
-    real(dp)  , allocatable :: k_fine_list(:,:)
-    integer   , allocatable :: displacement(:)
-    integer                 :: Nk_adapt_icore_mpi
-    integer   , allocatable :: Nk_adapt_icore(:) ! Nk_adaptive on every cores
-    integer                 :: Nk_adapt
-    integer(8), allocatable :: ik_adapt_list_mpi(:)
-    integer(8), allocatable :: ik_adapt_list    (:)
+    integer  :: Nk_adapt
+    real(dp) :: sk_max
+    integer(8), allocatable :: ik_adapt_list(:)
+    real(dp), allocatable   :: sk_list(:), sk_list_mpi(:) ! the maximum of abs(sigma) at every kpoint
+    logical , allocatable   :: sk_mask(:)
 
 contains
     subroutine Lambda_abc_df(W, velocities, sigma_xyy_k, sigma_yxx_k)
@@ -589,6 +588,8 @@ subroutine sigma_INPHC
     real(dp), allocatable :: Chi_xyyy_tensor_mpi(:,:,:,:)
     real(dp), allocatable :: Chi_yxxx_tensor_mpi(:,:,:,:)
 
+    real(dp) :: max_tmp(2)
+
     Eta_array(1) = Eta_Arc !> from wt.in
     Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
 
@@ -609,6 +610,12 @@ subroutine sigma_INPHC
 
     knv3= int8(Nk1)*Nk2*Nk3
 
+    allocate( sk_list_mpi(knv3))
+    allocate( sk_list    (knv3))
+
+    sk_list_mpi = 0
+    sk_list = 0
+
     call now(time_start)
     do ik= 1+ cpuid, knv3, num_cpu
         if (cpuid.eq.0 .and. mod(ik/num_cpu, 2000).eq.0) then
@@ -622,9 +629,91 @@ subroutine sigma_INPHC
 
         call sigma_INPHC_single_k(k, Chi_xyyy_k, Chi_yxxx_k)
 
-        Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi + Chi_xyyy_k
-        Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi + Chi_yxxx_k
+        max_tmp(1) = maxval(abs(Chi_xyyy_k))
+        max_tmp(2) = maxval(abs(Chi_yxxx_k))
+        sk_list_mpi(ik) = maxval( max_tmp ) 
     enddo ! ik
+
+    !--------------------------------------------------------------------------
+#if defined (MPI)
+    call mpi_barrier(mpi_cmw,ierr)
+    call mpi_allreduce(sk_list_mpi,sk_list,size(sk_list),mpi_dp,mpi_sum,mpi_cmw,ierr)
+#endif
+
+    allocate( sk_mask(knv3) )
+    sk_list = log(1d0 + sk_list)
+    sk_max  = maxval(sk_list)
+
+    do icut = 1, 100
+        sk_mask = ( sk_list>=(sk_max*(1d0-icut/100d0)) )
+        if ( (sum(sk_list,mask=sk_mask)) / (sum(sk_list)) > 0.9 ) then
+            Nk_adapt = count(sk_mask)
+            if (cpuid .eq. 0) then
+                write(stdout, '(" ")')
+                write(stdout, '("max = ", E12.3e3, ",  threshold = ", E12.3e3)') exp(sk_max), exp((sk_max*(1d0-icut/100d0)))
+                write(stdout, '("There are ", i15, "/", i18, "  k-points hit the threshold")') Nk_adapt, knv3
+                write(stdout, '(" ")')
+                write(stdout, '("Start to scan the local fine k-grids")')
+            endif
+            exit
+        endif
+    enddo
+    
+    allocate( ik_adapt_list(Nk_adapt) )
+    ik_adapt_list = 0
+    l = 0
+    do ik = 1,knv3
+        if (sk_mask(ik)) then
+            l = l + 1
+            ik_adapt_list(l) = ik
+        endif
+    enddo
+    deallocate(sk_list, sk_list_mpi, sk_mask)
+
+    if (Nk3<2) then
+        knv3_fine = Nk_fine**2
+    else 
+        knv3_fine = Nk_fine**3
+    endif
+    allocate(k_fine_list(knv3_fine,3))
+
+    k_fine_list = 0d0
+    do ikfine=1, knv3_fine
+        if (Nk3<2) then
+            ikfinex= (ikfine-1)/(Nk_fine)+1
+            ikfiney= (ikfine-1-(ikfinex-1)*Nk_fine)+1
+            ikfinez= 1
+        else 
+            ikfinex= (ikfine-1)/(Nk_fine*Nk_fine)+1
+            ikfiney= ((ikfine-1-(ikfinex-1)*Nk_fine*Nk_fine)/Nk_fine)+1
+            ikfinez= (ikfine-(ikfiney-1)*Nk_fine- (ikfinex-1)*Nk_fine*Nk_fine)
+        endif
+        k_fine_list(ikfine,:) = K3D_vec1_cube*(ikfinex-1)/dble(Nk1*Nk_fine)  &
+            + K3D_vec2_cube*(ikfiney-1)/dble(Nk2*Nk_fine)  &
+            + K3D_vec3_cube*(ikfinez-1)/dble(Nk3*Nk_fine)
+    enddo
+    !--------------------------------------------------------------------------
+    
+    call now(time_start)
+    do ik2= 1+ cpuid, Nk_adapt, num_cpu
+        if (cpuid.eq.0.and. mod(ik2/num_cpu, 200).eq.0) then
+            call now(time_end)
+            write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/Nk_adapt', &
+            ik2, Nk_adapt, '  time left', (Nk_adapt-ik2)*(time_end-time_start)/num_cpu/200d0/60d0
+            time_start= time_end
+        endif
+        ik = ik_adapt_list(ik2)
+        call ik_to_kpoint(ik,k)
+ 
+        do ikfine=1, knv3_fine
+            call sigma_INPHC_single_k(k + k_fine_list(ikfine,:), Chi_xyyy_k, Chi_yxxx_k)
+
+            Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi + Chi_xyyy_k/dble(knv3_fine)
+            Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi + Chi_yxxx_k/dble(knv3_fine)
+        enddo
+        
+    enddo ! ik
+
 
 #if defined (MPI)
     call mpi_barrier(mpi_cmw,ierr)
@@ -722,7 +811,7 @@ subroutine drude_weight
     call mpi_reduce(drude_mpi, drude, size(drude_mpi), mpi_dp, mpi_sum, 0, mpi_cmw, ierr)
 #endif
 
-    drude = drude * Echarge**2/hbar**2 *Hartree2J/Bohr_radius /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+    drude = - drude * Echarge**2/hbar**2 *Hartree2J/Bohr_radius /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
 
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then

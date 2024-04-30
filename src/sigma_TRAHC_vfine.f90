@@ -3,22 +3,19 @@ subroutine sigma_TRAHC
     use para
     use nonlinear_transport
     implicit none
+    
+    real(dp), parameter :: TRAHC_factor_tau1 = Echarge**4/hbar**2 *Bohr_radius /Hartree2J
+    real(dp), parameter :: TRAHC_factor_tau3 = Echarge**4/hbar**4 *Bohr_radius *Hartree2J
 
-    real(dp), parameter :: TRAHC_factor_tau1 = Echarge**4/hbar**2 *Bohr_radius/Hartree2J
-    real(dp), parameter :: TRAHC_factor_tau3 = Echarge**4/hbar**4 *Bohr_radius/Hartree2J
-    real(dp) :: lim=1d7
-
-    real(dp), allocatable :: sigma           (:,:,:)   !> the second index = xxxx xxyy yyxx yyyy
+    real(dp), allocatable :: sigma_k         (:,:,:)   !> the second index = xxxx xxyy yyxx yyyy
     real(dp), allocatable :: sigma_tensor    (:,:,:)
     real(dp), allocatable :: sigma_tensor_mpi(:,:,:)
-    real(dp), allocatable :: sigma_fine      (:,:,:)
 
     allocate( energy(OmegaNum))
 
-    allocate( sigma              (OmegaNum, 8, Eta_number))
+    allocate( sigma_k            (OmegaNum, 8, Eta_number))
     allocate( sigma_tensor       (OmegaNum, 8, Eta_number))
     allocate( sigma_tensor_mpi   (OmegaNum, 8, Eta_number))
-    allocate( sigma_fine         (OmegaNum, 8, Eta_number))
     
     sigma_tensor     = 0d0
     sigma_tensor_mpi = 0d0
@@ -31,15 +28,11 @@ subroutine sigma_TRAHC
     !> each k point
     knv3= int8(Nk1)*Nk2*Nk3
 
-    allocate( Nk_adapt_icore   (num_cpu))
-    allocate( displacement     (num_cpu))
-    allocate( ik_adapt_list_mpi(ceiling(real(knv3)/num_cpu)))         !> reduce memory
-    allocate( ik_adapt_list    (ceiling(real(knv3)/num_cpu)*num_cpu)) !> reduce memory
+    allocate( sk_list_mpi(knv3))
+    allocate( sk_list    (knv3))
 
-    Nk_adapt_icore      = 0
-    Nk_adapt_icore_mpi  = 0
-    ik_adapt_list       = 0
-    ik_adapt_list_mpi   = 0
+    sk_list_mpi = 0
+    sk_list = 0
 
     call now(time_start)
     do ik= 1+ cpuid, knv3, num_cpu
@@ -51,36 +44,44 @@ subroutine sigma_TRAHC
         endif
         
         call ik_to_kpoint(ik,k)
-
-        call sigma_TRAHC_k(k, sigma)
-
-        if (maxval(abs(sigma(:,1:4,:)))>lim) then
-            Nk_adapt_icore_mpi  = Nk_adapt_icore_mpi  + 1
-            ik_adapt_list_mpi(Nk_adapt_icore_mpi) = ik
-        else
-            sigma_tensor_mpi = sigma_tensor_mpi + sigma      
-        endif
-
+        call sigma_TRAHC_k(k, sigma_k)
+        sk_list_mpi(ik) = maxval(abs(sigma_k(:,1:4,:)))
     enddo ! ik
 
-    displacement = 0 
 #if defined (MPI)
     call mpi_barrier(mpi_cmw,ierr)
-    call mpi_allgather(Nk_adapt_icore_mpi, 1, mpi_in, Nk_adapt_icore, 1, mpi_in, mpi_cmw, ierr) !> Use integer8 here will cause error, but the reason is unknown
-    do icore=2, size(Nk_adapt_icore)
-        displacement(icore)=sum(Nk_adapt_icore(1:icore-1))
-    enddo
-    call mpi_allgatherv(ik_adapt_list_mpi, Nk_adapt_icore_mpi, mpi_integer8, ik_adapt_list, Nk_adapt_icore, &
-        displacement, mpi_integer8, mpi_cmw, ierr)
+    call mpi_allreduce(sk_list_mpi,sk_list,size(sk_list),mpi_dp,mpi_sum,mpi_cmw,ierr)
 #endif
 
-    Nk_adapt = sum(Nk_adapt_icore)
-    if (cpuid .eq. 0) then
-        write(stdout, '(" ")')
-        write(stdout, '("There are ", i15, "/", i18, "  k-points hit the threshold")') Nk_adapt, knv3
-        write(stdout, '(" ")')
-        write(stdout, '("Start to scan the local fine k-grids")')
-    endif
+    allocate( sk_mask(knv3) )
+    sk_list = log(1d0 + sk_list)
+    sk_max  = maxval(sk_list)
+
+    do icut = 1, 100
+        sk_mask = ( sk_list>=(sk_max*(1d0-icut/100d0)) )
+        if ( (sum(sk_list,mask=sk_mask)) / (sum(sk_list)) > 0.9 ) then
+            Nk_adapt = count(sk_mask)
+            if (cpuid .eq. 0) then
+                write(stdout, '(" ")')
+                write(stdout, '("max = ", E12.3e3, ",  threshold = ", E12.3e3)') exp(sk_max), exp((sk_max*(1d0-icut/100d0)))
+                write(stdout, '("There are ", i15, "/", i18, "  k-points hit the threshold")') Nk_adapt, knv3
+                write(stdout, '(" ")')
+                write(stdout, '("Start to scan the local fine k-grids")')
+            endif
+            exit
+        endif
+    enddo
+    
+    allocate( ik_adapt_list(Nk_adapt) )
+    ik_adapt_list = 0
+    l = 0
+    do ik = 1,knv3
+        if (sk_mask(ik)) then
+            l = l + 1
+            ik_adapt_list(l) = ik
+        endif
+    enddo
+    deallocate(sk_list, sk_list_mpi, sk_mask)
 
     if (Nk3<2) then
         knv3_fine = Nk_fine**2
@@ -115,14 +116,12 @@ subroutine sigma_TRAHC
         endif
         ik = ik_adapt_list(ik2)
         call ik_to_kpoint(ik,k)
-
-        sigma_fine=0d0
  
         do ikfine=1, knv3_fine
-            call sigma_TRAHC_k( k + k_fine_list(ikfine,:), sigma )
-            sigma_fine = sigma_fine + sigma
+            call sigma_TRAHC_k( k + k_fine_list(ikfine,:), sigma_k )
+            sigma_tensor_mpi = sigma_tensor_mpi + sigma_k/dble(knv3_fine)
         enddo
-        sigma_tensor_mpi = sigma_tensor_mpi + sigma_fine/dble(knv3_fine)
+        
     enddo ! ik
 
 
@@ -273,10 +272,9 @@ subroutine sigma_TRAHC_k(kin, sigma_tensor)
         
         !> sum of all other bands n
         do n= 1, Num_wann
+            if (ABS(eig(m)-eig(n)) < band_degeneracy_threshold) cycle
 
             do ikm = 1,3
-                if (ABS(eig(m)-eig(n)) < band_degeneracy_threshold) cycle
-
                 G_xx(ikm)= G_xx(ikm)+ 2.d0*real(vxmat(m, n, ikm)*vxmat(n, m, ikm)*((eigmat(m,ikm)-eigmat(n,ikm))/((eigmat(m,ikm)-eigmat(n,ikm))**2))**3)
                 G_xy(ikm)= G_xy(ikm)+ 2.d0*real(vxmat(m, n, ikm)*vymat(n, m, ikm)*((eigmat(m,ikm)-eigmat(n,ikm))/((eigmat(m,ikm)-eigmat(n,ikm))**2))**3)
                 G_yx(ikm)= G_yx(ikm)+ 2.d0*real(vymat(m, n, ikm)*vxmat(n, m, ikm)*((eigmat(m,ikm)-eigmat(n,ikm))/((eigmat(m,ikm)-eigmat(n,ikm))**2))**3)
