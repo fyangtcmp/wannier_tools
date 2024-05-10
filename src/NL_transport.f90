@@ -403,7 +403,189 @@ contains
     
     end subroutine drude_weight_single_k
 
+
+    subroutine sigma_TRAHC_k(kin, sigma_tensor)
+
+        use wmpi
+        use para
+        implicit none
+    
+        real(dp), intent(in)  :: kin(3)
+        real(dp), intent(out) :: sigma_tensor(OmegaNum, 8, Eta_number)
+    
+        integer  :: iR, ikm
+        real(dp) :: kdotr
+        !real(dp) :: sqkvec1(3),sqkvec2(3),sqkvec3(3)
+        !real(dp) :: kyp(3), kym(3)
+        real(dp) :: kmat(3,3)
+        real(dp) :: pyG_yy, pyG_yx, pyG_xx
+        real(dp) :: pxG_xx, pxG_xy, pxG_yy
+    
+        !> Gij
+        real(dp) :: G_xy(3),G_yx(3),G_xx(3),G_yy(3)
+    
+        !> eigen value of H
+        real(dp), allocatable :: W(:),eig(:),eigmat(:,:)
+        complex(dp), allocatable :: Hamk_bulk(:, :)
+        complex(dp), allocatable :: Amat(:, :)
+        complex(dp), allocatable :: UU(:, :)
+        complex(dp), allocatable :: UU_dag(:, :)
+    
+        !> velocities
+        complex(dp), allocatable :: vx(:, :), vy(:, :)
+        complex(dp), allocatable :: vxmat(:, :, :), vymat(:, :, :)
+        complex(dp), allocatable :: vxx(:, :), vxy(:, :), vyy(:, :)
+    
+        real(dp) :: vxx_2, vxy_2, vyy_2, exx, exy, eyy
+        real(dp), allocatable :: Fshort(:) !> short notation of the denominator of the Fermi distribution
+        real(dp), allocatable :: diffFermi(:), diff2Fermi(:)
+    
+        allocate( Fshort(OmegaNum), diffFermi(OmegaNum), diff2Fermi(OmegaNum))
+    
+        allocate( W (Num_wann))
+        allocate( eig(Num_wann))
+        allocate( eigmat(Num_wann,3))
+        allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
+        allocate( vxmat(Num_wann, Num_wann,3), vymat(Num_wann, Num_wann,3))
+        allocate( vxx(Num_wann, Num_wann), vxy(Num_wann, Num_wann), vyy(Num_wann, Num_wann))
+        allocate( Hamk_bulk(Num_wann, Num_wann))
+        allocate( Amat(Num_wann, Num_wann))
+        allocate( UU(Num_wann, Num_wann))
+        allocate( UU_dag(Num_wann, Num_wann))
+    
+        Hamk_bulk=0d0
+        Amat= 0d0
+        UU_dag=0d0
+        UU= 0d0
+        eig=0d0
+        eigmat=0d0
+        W=0d0
+    
+        kmat(1,:)=kin - [Origin_cell%Rua(1) , Origin_cell%Rub(1) , Origin_cell%Ruc(1)]*dkx/twopi
+        kmat(2,:)=kin - [Origin_cell%Rua(2) , Origin_cell%Rub(2) , Origin_cell%Ruc(2)]*dky/twopi
+        kmat(3,:)=kin
+    
+        do ikm= 1,3
+            k=kmat(ikm,:)
+            ! calculation bulk hamiltonian by a direct Fourier transformation of HmnR
+            call ham_bulk_latticegauge(k, Hamk_bulk)
+            
+            !> diagonalization by call zheev in lapack
+            UU=Hamk_bulk
+            call eigensystem_c( 'V', 'U', Num_wann, UU, W)
+            UU_dag= conjg(transpose(UU))
+            eigmat(:,ikm)=W
+            vx= 0d0; vy= 0d0!; vz= 0d0
+            vxx= 0d0; vxy =0d0; vyy=0d0
+            do iR= 1, Nrpts
+                kdotr= k(1)*irvec(1,iR) + k(2)*irvec(2,iR) + k(3)*irvec(3,iR)
+                vx= vx+ zi*crvec(1, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+                vy= vy+ zi*crvec(2, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+                if (ikm == 3) then
+                    vxx= vxx - crvec(1, iR)*crvec(1, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+                    vxy= vxy - crvec(1, iR)*crvec(2, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+                    vyy= vyy - crvec(2, iR)*crvec(2, iR)*HmnR(:,:,iR)*Exp(pi2zi*kdotr)/ndegen(iR)
+                endif
+            enddo ! iR
+        
+            !> unitility rotate velocity
+            UU_dag= conjg(transpose(UU))
+            call mat_mul(Num_wann, vx, UU, Amat)
+            call mat_mul(Num_wann, UU_dag, Amat, vx)
+            call mat_mul(Num_wann, vy, UU, Amat)
+            call mat_mul(Num_wann, UU_dag, Amat, vy)
+            vxmat(:,:,ikm)=vx
+            vymat(:,:,ikm)=vy
+            if (ikm == 3) then
+                call mat_mul(Num_wann, vxx, UU, Amat)
+                call mat_mul(Num_wann, UU_dag, Amat, vxx)
+                call mat_mul(Num_wann, vxy, UU, Amat)
+                call mat_mul(Num_wann, UU_dag, Amat, vxy)
+                call mat_mul(Num_wann, vyy, UU, Amat)
+                call mat_mul(Num_wann, UU_dag, Amat, vyy)
+            endif
+        enddo !ikm
+    
+        eig= eigmat(:,3)
+        vx = vxmat(:,:,3)
+        vy = vymat(:,:,3)
+        sigma_tensor=0d0
+    
+        do m= 1, Num_wann
+            if (eig(m)<OmegaMin- 2.d-2 .or. eig(m)>OmegaMax+ 2.d-2) cycle !> prevent NaN error
+            !> calculate G for each band
+            !> G_xy == G_yx, we calculate both of them to check it
+            G_xx=0d0; G_xy=0d0; G_yx=0d0; G_yy=0d0
+            vxx_2=0d0; vxy_2=0d0; vyy_2=0d0
+            
+            !> sum of all other bands n
+            do n= 1, Num_wann
+                if (ABS(eig(m)-eig(n)) < band_degeneracy_threshold) cycle
+    
+                do ikm = 1,3
+                    G_xx(ikm)= G_xx(ikm)+ 2.d0*real(vxmat(m, n, ikm)*vxmat(n, m, ikm)*((eigmat(m,ikm)-eigmat(n,ikm))/((eigmat(m,ikm)-eigmat(n,ikm))**2))**3)
+                    G_xy(ikm)= G_xy(ikm)+ 2.d0*real(vxmat(m, n, ikm)*vymat(n, m, ikm)*((eigmat(m,ikm)-eigmat(n,ikm))/((eigmat(m,ikm)-eigmat(n,ikm))**2))**3)
+                    G_yx(ikm)= G_yx(ikm)+ 2.d0*real(vymat(m, n, ikm)*vxmat(n, m, ikm)*((eigmat(m,ikm)-eigmat(n,ikm))/((eigmat(m,ikm)-eigmat(n,ikm))**2))**3)
+                    G_yy(ikm)= G_yy(ikm)+ 2.d0*real(vymat(m, n, ikm)*vymat(n, m, ikm)*((eigmat(m,ikm)-eigmat(n,ikm))/((eigmat(m,ikm)-eigmat(n,ikm))**2))**3)         
+                enddo
+    
+                vxx_2= vxx_2+2d0*real(vx(m, n)*vx(n, m)*(eig(m)-eig(n))/((eig(m)-eig(n))**2))
+                vxy_2= vxy_2+2d0*real(vx(m, n)*vy(n, m)*(eig(m)-eig(n))/((eig(m)-eig(n))**2))
+                vyy_2= vyy_2+2d0*real(vy(m, n)*vy(n, m)*(eig(m)-eig(n))/((eig(m)-eig(n))**2))
+            enddo ! n
+        
+            pyG_yy=(G_yy(3)-G_yy(2))/dky
+            pyG_xx=(G_xx(3)-G_xx(2))/dky
+            pyG_yx=(G_yx(3)-G_yx(2))/dky  
+    
+            pxG_xx=(G_xx(3)-G_xx(1))/dkx
+            pxG_xy=(G_xy(3)-G_xy(1))/dkx
+            pxG_yy=(G_yy(3)-G_yy(1))/dkx
+    
+            exx=real(vxx(m,m))+vxx_2
+            exy=real(vxy(m,m))+vxy_2
+            eyy=real(vyy(m,m))+vyy_2
+            
+            do ieta=1, Eta_number
+                Fshort = Exp((eig(m)-energy)/Eta_array(ieta))
+                !> this format is very important! prevent NaN error
+                diffFermi  = -1d0 / (Fshort+1d0) / (1d0/Fshort+1d0) / Eta_array(ieta)
+                diff2Fermi = diffFermi * ( 1d0 - 2d0 / (1d0/Fshort+1d0)) / Eta_array(ieta)
+    
+                ! xxxx/tau
+                sigma_tensor(:,1,ieta) = sigma_tensor(:,1,ieta) + pxG_xx*real(vx(m,m))*diffFermi + real(vx(m,m)*vx(m,m))*G_xx(3)*diff2Fermi/2d0
+    
+                ! xxyy/tau
+                sigma_tensor(:,2,ieta) = sigma_tensor(:,2,ieta) +  real(vy(m,m))* (2d0*pxG_xy + pyG_xx) *diffFermi/3d0 &
+                    + ( real(vx(m,m)*vx(m,m))*G_yy(3) + 2d0*real(vx(m,m)*vy(m,m))*G_xy(3) )*diff2Fermi/6d0
+    
+                ! yyxx/tau
+                sigma_tensor(:,3,ieta) = sigma_tensor(:,3,ieta) +  real(vx(m,m))* (2d0*pyG_yx + pxG_yy) *diffFermi/3d0 &
+                    + ( real(vy(m,m)*vy(m,m))*G_xx(3) + 2d0*real(vy(m,m)*vx(m,m))*G_yx(3) )*diff2Fermi/6d0
+    
+                ! yyyy/tau
+                sigma_tensor(:,4,ieta) = sigma_tensor(:,4,ieta) + pyG_yy*real(vy(m,m))*diffFermi + real(vy(m,m)*vy(m,m))*G_yy(3)*diff2Fermi/2d0
+    
+                ! xxxx/tau**3
+                sigma_tensor(:,5,ieta) = sigma_tensor(:,5,ieta) + exx*exx*diffFermi + exx*real(vx(m,m)*vx(m,m))*diff2Fermi
+    
+                ! xxyy/tau**3
+                sigma_tensor(:,6,ieta) = sigma_tensor(:,6,ieta) + (exx*eyy*diffFermi + exx*real(vy(m,m)*vy(m,m))*diff2Fermi &
+                    +2d0*exy*exy*diffFermi + 2d0*exy*real(vx(m,m)*vy(m,m))*diff2Fermi)/3d0
+    
+                ! yyxx/tau**3
+                sigma_tensor(:,7,ieta) = sigma_tensor(:,7,ieta) + (eyy*exx*diffFermi + eyy*real(vx(m,m)*vx(m,m))*diff2Fermi &
+                    +2d0*exy*exy*diffFermi + 2d0*exy*real(vx(m,m)*vy(m,m))*diff2Fermi)/3d0
+                
+                ! yyyy/tau**3
+                sigma_tensor(:,8,ieta) = sigma_tensor(:,8,ieta) + eyy*eyy*diffFermi + eyy*real(vy(m,m)*vy(m,m))*diff2Fermi
+                
+            enddo ! ieta
+        enddo !m
+    
+    end subroutine sigma_TRAHC_k    
 end module
+
 
 subroutine velocity_latticegauge_simple(k_in, UU, velocities) !> dH_dk, without 1/hbar
     use para, only: dp, irvec, crvec, HmnR, pi2zi, ndegen, Nrpts, Num_wann, zi
@@ -437,6 +619,7 @@ subroutine velocity_latticegauge_simple(k_in, UU, velocities) !> dH_dk, without 
 
 end subroutine velocity_latticegauge_simple
 
+
 subroutine ik_to_kpoint(ik,k)
     use para, only: dp, Nk1, Nk2, Nk3, K3D_start_cube, K3D_vec1_cube, K3D_vec2_cube, K3D_vec3_cube
     implicit none
@@ -469,366 +652,3 @@ subroutine Fermi_energy_list(energy)
 end subroutine Fermi_energy_list
 
 
-subroutine sigma_ISOAHC
-
-    !> Calculate the intrinsic second order anomalous hall conductivity, the xyy and yxx elements
-    !
-    !> usage: sigma_SOAHC_int_calc = T
-    !
-    !> ref1 : 10.1103/PhysRevLett.127.277201
-    !> ref2 : 10.1103/PhysRevLett.127.277202
-    !
-    !> Original developed by Huiying Liu
-    !> 2022/07/15 Fan Yang, correct the units
-    !> 2023/10/30 Fan Yang, update to wannier tools 2.7.0
-    !> 2023/11/06 Fan Yang, adaptive k-meshes methods to accelerate speed
-
-    use wmpi
-    use para
-    use nonlinear_transport
-    implicit none
-
-    real(dp), parameter :: SOAHC_unit_factor =  Echarge**3/hbar/Hartree2J
-
-    real(dp), allocatable :: sigma_xyy    (:,:)
-    real(dp), allocatable :: sigma_yxx    (:,:)
-    real(dp), allocatable :: sigma_xyy_k  (:,:)
-    real(dp), allocatable :: sigma_yxx_k  (:,:)
-    real(dp), allocatable :: sigma_xyy_mpi(:,:)
-    real(dp), allocatable :: sigma_yxx_mpi(:,:)
-
-    Eta_array(1) = Eta_Arc !> from wt.in
-    Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
-
-    allocate( sigma_xyy        (OmegaNum, Eta_number))
-    allocate( sigma_yxx        (OmegaNum, Eta_number))
-    allocate( sigma_xyy_k      (OmegaNum, Eta_number))
-    allocate( sigma_yxx_k      (OmegaNum, Eta_number))
-    allocate( sigma_xyy_mpi    (OmegaNum, Eta_number))
-    allocate( sigma_yxx_mpi    (OmegaNum, Eta_number))
-
-    allocate( energy(OmegaNum))
-    call Fermi_energy_list(energy)
-
-    knv3= int8(Nk1)*Nk2*Nk3
-
-    sigma_xyy_mpi    = 0.d0
-    sigma_yxx_mpi    = 0.d0
-
-    call now(time_start)
-    do ik= 1+ cpuid, knv3, num_cpu
-        if (cpuid.eq.0.and. mod(ik/num_cpu, 2000).eq.0) then
-            call now(time_end)
-            write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/knv3', &
-                ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/2000d0/60d0
-            time_start= time_end
-        endif
-
-        call ik_to_kpoint(ik,k)
-
-        call sigma_ISOAHC_single_k(k, sigma_xyy_k, sigma_yxx_k)
-
-        sigma_xyy_mpi = sigma_xyy_mpi + sigma_xyy_k
-        sigma_yxx_mpi = sigma_yxx_mpi + sigma_yxx_k
-    enddo ! ik
-
-#if defined (MPI)
-    call mpi_barrier(mpi_cmw,ierr)
-    call mpi_allreduce(sigma_xyy_mpi,sigma_xyy,size(sigma_xyy),&
-        mpi_dp,mpi_sum,mpi_cmw,ierr)
-    call mpi_allreduce(sigma_yxx_mpi,sigma_yxx,size(sigma_yxx),&
-        mpi_dp,mpi_sum,mpi_cmw,ierr)
-#endif
-
-    !> the sigma_xyy contains an additional [energy]^-1 dimension, so besides e^3/hbar, we need to convert hartree to joule
-    sigma_xyy= sigma_xyy * SOAHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-    sigma_yxx= sigma_yxx * SOAHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-
-    outfileindex= outfileindex+ 1
-    if (cpuid.eq.0) then
-        do ieta=1, Eta_number
-            write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
-            write(ahcfilename, '(7a)')'sigma_ISOAHC_eta', trim(adjustl(Eta_name)), 'meV.dat'
-            open(unit=outfileindex, file=ahcfilename)
-            write(outfileindex, '("#",a)')' Intrinsic 2nd anomalous hall conductivity, in unit of A.V^-2 for 3D cases.'
-            write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
-            write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyy', '\sigma_yxx'
-            do ie=1, OmegaNum
-                write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, sigma_xyy(ie,ieta), &
-                    sigma_yxx(ie,ieta)
-            enddo
-            close(outfileindex)
-        enddo
-    endif
-
-end subroutine sigma_ISOAHC
-
-
-subroutine sigma_INPHC
-    !> Calculate the intrinsic nonlinear planar Hall conductivity, the xyyy and yxxx elements
-    !
-    !> usage: sigma_NPHC_int_calc = T
-    !
-    !> ref : 10.1103/PhysRevLett.130.126303
-    !
-    !> 2023/10/31 Fan Yang
-    !
-
-    use wmpi
-    use para
-    use nonlinear_transport
-    implicit none
-
-    real(dp), parameter :: INPHC_unit_factor = -Echarge**3/hbar/Hartree2J * mu_B
-
-    real(dp), allocatable :: Chi_xyyy_k         (:,:,:,:)
-    real(dp), allocatable :: Chi_yxxx_k         (:,:,:,:)
-    real(dp), allocatable :: Chi_xyyy_tensor    (:,:,:,:)
-    real(dp), allocatable :: Chi_yxxx_tensor    (:,:,:,:)
-    real(dp), allocatable :: Chi_xyyy_tensor_mpi(:,:,:,:)
-    real(dp), allocatable :: Chi_yxxx_tensor_mpi(:,:,:,:)
-
-    real(dp) :: max_tmp(2)
-
-    Eta_array(1) = Eta_Arc !> from wt.in
-    Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
-
-    allocate( Chi_xyyy_k         (OmegaNum, Eta_number,2,2))
-    allocate( Chi_yxxx_k         (OmegaNum, Eta_number,2,2))
-    allocate( Chi_xyyy_tensor    (OmegaNum, Eta_number,2,2))
-    allocate( Chi_yxxx_tensor    (OmegaNum, Eta_number,2,2))
-    allocate( Chi_xyyy_tensor_mpi(OmegaNum, Eta_number,2,2))
-    allocate( Chi_yxxx_tensor_mpi(OmegaNum, Eta_number,2,2))
-
-    Chi_xyyy_tensor     = 0d0
-    Chi_yxxx_tensor     = 0d0
-    Chi_xyyy_tensor_mpi = 0d0
-    Chi_yxxx_tensor_mpi = 0d0
-
-    allocate( energy(OmegaNum))
-    call Fermi_energy_list(energy)
-
-    knv3= int8(Nk1)*Nk2*Nk3
-
-    allocate( sk_list_mpi(knv3))
-    allocate( sk_list    (knv3))
-
-    sk_list_mpi = 0
-    sk_list = 0
-
-    call now(time_start)
-    do ik= 1+ cpuid, knv3, num_cpu
-        if (cpuid.eq.0 .and. mod(ik/num_cpu, 2000).eq.0) then
-            call now(time_end)
-            write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/knv3', &
-                ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/2000d0/60d0
-            time_start= time_end
-        endif
-
-        call ik_to_kpoint(ik,k)
-
-        call sigma_INPHC_single_k(k, Chi_xyyy_k, Chi_yxxx_k)
-
-        max_tmp(1) = maxval(abs(Chi_xyyy_k))
-        max_tmp(2) = maxval(abs(Chi_yxxx_k))
-        sk_list_mpi(ik) = maxval( max_tmp ) 
-    enddo ! ik
-
-    !--------------------------------------------------------------------------
-#if defined (MPI)
-    call mpi_barrier(mpi_cmw,ierr)
-    call mpi_allreduce(sk_list_mpi,sk_list,size(sk_list),mpi_dp,mpi_sum,mpi_cmw,ierr)
-#endif
-
-    allocate( sk_mask(knv3) )
-    sk_list = log(1d0 + sk_list)
-    sk_max  = maxval(sk_list)
-
-    do icut = 1, 100
-        sk_mask = ( sk_list>=(sk_max*(1d0-icut/100d0)) )
-        if ( (sum(sk_list,mask=sk_mask)) / (sum(sk_list)) > 0.9 ) then
-            Nk_adapt = count(sk_mask)
-            if (cpuid .eq. 0) then
-                write(stdout, '(" ")')
-                write(stdout, '("max = ", E12.3e3, ",  threshold = ", E12.3e3)') exp(sk_max), exp((sk_max*(1d0-icut/100d0)))
-                write(stdout, '("There are ", i15, "/", i18, "  k-points hit the threshold")') Nk_adapt, knv3
-                write(stdout, '(" ")')
-                write(stdout, '("Start to scan the local fine k-grids")')
-            endif
-            exit
-        endif
-    enddo
-    
-    allocate( ik_adapt_list(Nk_adapt) )
-    ik_adapt_list = 0
-    l = 0
-    do ik = 1,knv3
-        if (sk_mask(ik)) then
-            l = l + 1
-            ik_adapt_list(l) = ik
-        endif
-    enddo
-    deallocate(sk_list, sk_list_mpi, sk_mask)
-
-    if (Nk3<2) then
-        knv3_fine = Nk_fine**2
-    else 
-        knv3_fine = Nk_fine**3
-    endif
-    allocate(k_fine_list(knv3_fine,3))
-
-    k_fine_list = 0d0
-    do ikfine=1, knv3_fine
-        if (Nk3<2) then
-            ikfinex= (ikfine-1)/(Nk_fine)+1
-            ikfiney= (ikfine-1-(ikfinex-1)*Nk_fine)+1
-            ikfinez= 1
-        else 
-            ikfinex= (ikfine-1)/(Nk_fine*Nk_fine)+1
-            ikfiney= ((ikfine-1-(ikfinex-1)*Nk_fine*Nk_fine)/Nk_fine)+1
-            ikfinez= (ikfine-(ikfiney-1)*Nk_fine- (ikfinex-1)*Nk_fine*Nk_fine)
-        endif
-        k_fine_list(ikfine,:) = K3D_vec1_cube*(ikfinex-1)/dble(Nk1*Nk_fine)  &
-            + K3D_vec2_cube*(ikfiney-1)/dble(Nk2*Nk_fine)  &
-            + K3D_vec3_cube*(ikfinez-1)/dble(Nk3*Nk_fine)
-    enddo
-    !--------------------------------------------------------------------------
-    
-    call now(time_start)
-    do ik2= 1+ cpuid, Nk_adapt, num_cpu
-        if (cpuid.eq.0.and. mod(ik2/num_cpu, 200).eq.0) then
-            call now(time_end)
-            write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/Nk_adapt', &
-            ik2, Nk_adapt, '  time left', (Nk_adapt-ik2)*(time_end-time_start)/num_cpu/200d0/60d0
-            time_start= time_end
-        endif
-        ik = ik_adapt_list(ik2)
-        call ik_to_kpoint(ik,k)
- 
-        do ikfine=1, knv3_fine
-            call sigma_INPHC_single_k(k + k_fine_list(ikfine,:), Chi_xyyy_k, Chi_yxxx_k)
-
-            Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi + Chi_xyyy_k/dble(knv3_fine)
-            Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi + Chi_yxxx_k/dble(knv3_fine)
-        enddo
-        
-    enddo ! ik
-
-
-#if defined (MPI)
-    call mpi_barrier(mpi_cmw,ierr)
-    call mpi_reduce(Chi_xyyy_tensor_mpi, Chi_xyyy_tensor, size(Chi_xyyy_tensor), mpi_dp,mpi_sum, 0, mpi_cmw,ierr)
-    call mpi_reduce(Chi_yxxx_tensor_mpi, Chi_yxxx_tensor, size(Chi_yxxx_tensor), mpi_dp,mpi_sum, 0, mpi_cmw,ierr)
-#endif
-
-    Chi_xyyy_tensor = Chi_xyyy_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-    Chi_yxxx_tensor = Chi_yxxx_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-
-    outfileindex= outfileindex+ 1
-    if (cpuid.eq.0) then
-        do ieta=1, Eta_number
-            write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
-
-            if (include_m_spin) then
-                write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
-                open(unit=outfileindex, file=ahcfilename)
-                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
-                write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
-
-                write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy_I', '\sigma_xyyy_II', '\sigma_xyyy_tot', '\sigma_yxxx_I', '\sigma_yxxx_II','\sigma_yxxx_tot'
-                do ie=1, OmegaNum
-                    write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, &
-                        Chi_xyyy_tensor(ie,ieta,1,1), Chi_xyyy_tensor(ie,ieta,1,2), Chi_xyyy_tensor(ie,ieta,1,1) + Chi_xyyy_tensor(ie,ieta,1,2),&
-                        Chi_yxxx_tensor(ie,ieta,1,1), Chi_yxxx_tensor(ie,ieta,1,2), Chi_yxxx_tensor(ie,ieta,1,1) + Chi_yxxx_tensor(ie,ieta,1,2)
-                enddo
-                close(outfileindex)
-            endif
-
-            if (include_m_orb ) then
-                write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
-                open(unit=outfileindex, file=ahcfilename)
-                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
-                write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
-
-                write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy_I', '\sigma_xyyy_II', '\sigma_xyyy_tot', '\sigma_yxxx_I', '\sigma_yxxx_II','\sigma_yxxx_tot'
-                do ie=1, OmegaNum
-                    write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, &
-                        Chi_xyyy_tensor(ie,ieta,2,1), Chi_xyyy_tensor(ie,ieta,2,2), Chi_xyyy_tensor(ie,ieta,2,1) + Chi_xyyy_tensor(ie,ieta,2,2),&
-                        Chi_yxxx_tensor(ie,ieta,2,1), Chi_yxxx_tensor(ie,ieta,2,2), Chi_yxxx_tensor(ie,ieta,2,1) + Chi_yxxx_tensor(ie,ieta,2,2)
-                enddo
-                close(outfileindex)
-            endif
-        enddo
-    endif
-
-end subroutine sigma_INPHC
-
-
-subroutine drude_weight
-
-    use wmpi
-    use para
-    use nonlinear_transport
-    implicit none
-    
-    real(dp), allocatable :: drude      (:,:,:)
-    real(dp), allocatable :: drude_mpi  (:,:,:)
-    real(dp), allocatable :: drude_k    (:,:,:)
-
-    allocate( drude    (OmegaNum, Eta_number,2))
-    allocate( drude_mpi(OmegaNum, Eta_number,2))
-    allocate( drude_k  (OmegaNum, Eta_number,2))
-
-    Eta_array(1) = Eta_Arc !> from wt.in
-    Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
-
-    allocate( energy(OmegaNum))
-    call Fermi_energy_list(energy)
-
-    knv3= int8(Nk1)*Nk2*Nk3
-    drude = 0d0
-    drude_mpi = 0d0
-
-    call now(time_start)
-    do ik= 1+ cpuid, knv3, num_cpu
-        if (cpuid.eq.0 .and. mod(ik/num_cpu, 2000).eq.0) then
-            call now(time_end)
-            write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/knv3', &
-                ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/num_cpu/2000d0/60d0
-            time_start= time_end
-        endif
-
-        call ik_to_kpoint(ik,k)
-
-        call drude_weight_single_k(k, drude_k)
-
-        drude_mpi = drude_mpi + drude_k
-    enddo ! ik
-
-#if defined (MPI)
-    call mpi_barrier(mpi_cmw,ierr)
-    call mpi_reduce(drude_mpi, drude, size(drude_mpi), mpi_dp, mpi_sum, 0, mpi_cmw, ierr)
-    call mpi_reduce(drude_mpi, drude, size(drude_mpi), mpi_dp, mpi_sum, 0, mpi_cmw, ierr)
-#endif
-
-    drude = - drude * Echarge**2/hbar**2 *Hartree2J/Bohr_radius /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-
-    outfileindex= outfileindex+ 1
-    if (cpuid.eq.0) then
-        do ieta=1, Eta_number
-            write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
-
-            write(ahcfilename, '(7a)')'drude_weight_eta', trim(adjustl(Eta_name)), 'meV.dat'
-            open(unit=outfileindex, file=ahcfilename)
-            write(outfileindex, '("#",a)')' Drude weight, in unit of S/m/(relaxation time)'
-            write(outfileindex, '("#",a)')'  '
-
-            write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', 'xx', 'yy' !, 'zz'
-            do ie=1, OmegaNum
-                write(outfileindex, '(20E16.5e3)')energy(ie)/eV2Hartree, drude(ie,ieta,1), drude(ie,ieta,2)
-            enddo
-            close(outfileindex)
-        enddo
-    endif
-
-end subroutine drude_weight

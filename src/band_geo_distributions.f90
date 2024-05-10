@@ -3,7 +3,6 @@
 !> the calculations on nonlinear transport are heavy, so the parallel version of wt.x is needed.
 
 
-#if defined (MPI)
 subroutine band_geo_props_kplane
     
     use wmpi
@@ -36,12 +35,12 @@ subroutine band_geo_props_kplane
    
     ik =0
     do i= 1, nk1
-       do j= 1, nk2
-          ik =ik +1
-          kslice(ik, :)= K3D_start+ K3D_vec1*(i-1)/dble(nk1-1)  &
-                    + K3D_vec2*(j-1)/dble(nk2-1) ! - (K3D_vec1+ K3D_vec2)/2d0
-          kslice_xyz(ik, :)= kslice(ik, 1)* Origin_cell%Kua+ kslice(ik, 2)* Origin_cell%Kub+ kslice(ik, 3)* Origin_cell%Kuc 
-       enddo
+        do j= 1, nk2
+            ik =ik +1
+            kslice(ik, :)= K3D_start+ K3D_vec1*(i-1)/dble(nk1-1)  &
+                        + K3D_vec2*(j-1)/dble(nk2-1) - (K3D_vec1+ K3D_vec2)/2d0
+            kslice_xyz(ik, :)= kslice(ik, 1)* Origin_cell%Kua+ kslice(ik, 2)* Origin_cell%Kub+ kslice(ik, 3)* Origin_cell%Kuc 
+        enddo
     enddo
 
     call now(time_start)
@@ -59,13 +58,15 @@ subroutine band_geo_props_kplane
 
     enddo ! ik
 
+#if defined (MPI)
     call mpi_allreduce(props_mpi, props, size(props), mpi_dp,mpi_sum,mpi_cmw,ierr)
+#endif
 
     !> write the Berry curvature to file
     outfileindex= outfileindex+ 1
     if (cpuid==0) then
         open(unit=outfileindex, file='band_geometry_kplane.dat')
-        write(outfileindex, '(9a12)')'# k1', 'k2', 'k3', & ! "kx' (1/A)", "ky' (1/A)", "kz' (1/A)", &
+        write(outfileindex, '("#",1a11, 2a12, 12a15)') "kx (1/A)", "ky (1/A)", "kz (1/A)", &
             'G_xx', 'G_xy', 'G_yx', 'G_yy', 'L_xyy', 'L_yxx' 
 
         ik= 0
@@ -73,7 +74,7 @@ subroutine band_geo_props_kplane
             do j= 1, nk2
                 ik= ik+ 1
                 ! call rotate_k3_to_kplane(kslice_xyz(ik, :), kxy_plane)
-                write(outfileindex, '(3f9.3,6E12.3e3)') kslice(ik, :), props(ik, :) ! kxy_plane*Angstrom2atomic, &
+                write(outfileindex, '(3f12.6, 12E15.4e3)') kslice_xyz(ik, :)/Ang2Bohr, props(ik, :) ! kxy_plane*Angstrom2atomic, &
             enddo
             ! write(outfileindex, *) ' '
         enddo
@@ -82,13 +83,9 @@ subroutine band_geo_props_kplane
 
     endif
 
-    deallocate( kslice, kslice_xyz )
-    deallocate( props, props_mpi )
-
     return
 
 end subroutine
-#endif
 
 
 subroutine ISOAHC_dist_single_k_Ef(k_in, props)
@@ -132,7 +129,8 @@ subroutine ISOAHC_dist_single_k_Ef(k_in, props)
 
     props = 0d0
 
-    do m= 1, Num_wann
+    m = Numoccupied
+    !do m= 1, Num_wann
         !> calculate G for each band
         G_xx=0d0; G_xy=0d0; G_yx=0d0; G_yy=0d0
 
@@ -157,7 +155,7 @@ subroutine ISOAHC_dist_single_k_Ef(k_in, props)
         props(5) = props(5) + (G_yy*real(vx(m,m))-G_xy*real(vy(m,m))) * diffFermi
         props(6) = props(6) + (G_xx*real(vy(m,m))-G_yx*real(vx(m,m))) * diffFermi
         
-    enddo ! m
+    !enddo ! m
 
     deallocate(W, vx, vy, Hamk_bulk, Amat, UU, UU_dag, velocities)
     return
@@ -232,11 +230,12 @@ subroutine INPHC_dist_single_k_Ef(k_in, props)
         call orbital_magnetic_moments(W, velocities, M_L)
     endif
 
-    sx = -0.5d0 * Lande_g_S * M_S(:,:,1) + Lande_g_L * M_L(:,:,1)
-    sy = -0.5d0 * Lande_g_S * M_S(:,:,2) + Lande_g_L * M_L(:,:,2)
-    sz = -0.5d0 * Lande_g_S * M_S(:,:,3) + Lande_g_L * M_L(:,:,3)
+    sx = -0.5d0 * Lande_g_S * M_S(:,:,1)! + Lande_g_L * M_L(:,:,1)
+    sy = -0.5d0 * Lande_g_S * M_S(:,:,2) !+ Lande_g_L * M_L(:,:,2)
+    sz = -0.5d0 * Lande_g_S * M_S(:,:,3) !+ Lande_g_L * M_L(:,:,3)
 
-    do n= 1, Num_wann
+    n = Numoccupied
+    ! do n= 1, Num_wann
         G_xx= 0d0
         G_xy= 0d0
         G_yx= 0d0
@@ -293,7 +292,7 @@ subroutine INPHC_dist_single_k_Ef(k_in, props)
         props(4) = props(4) + G_yy * diffFermi
         props(5) = props(5) + Lambda_xyy * diffFermi
         props(6) = props(6) + Lambda_yxx * diffFermi
-    enddo ! n
+    ! enddo ! n
 
     deallocate(W, vx, vy, Hamk_bulk, Amat, UU, UU_dag, velocities)
     deallocate(sx, sy, sz)

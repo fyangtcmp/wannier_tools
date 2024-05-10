@@ -13,6 +13,7 @@
 
   module wmpi
      use prec
+     use mpi_f08, only: MPI_STATUS
 
 #if defined (MPI)
      include 'mpif.h'
@@ -27,6 +28,13 @@
      integer, parameter :: mpi_dc= mpi_double_complex
      integer, parameter :: mpi_cmw= mpi_comm_world
 #endif 
+
+     !> this format needs mpi_f08.mod
+     !> the corresponding indexes are status.MPI_SOURCE, status.MPI_TAG, status.MPI_ERROR
+     type(MPI_STATUS)  :: mpistatus
+     !> this format does not need mpi_f08.mod
+     !> the corresponding indexes are status(MPI_SOURCE), status(MPI_TAG), status(MPI_ERROR)
+     ! integer :: status(MPI_STATUS_SIZE) 
 
      !> Define a structure containing information for doing communication
      type WTParCSRComm
