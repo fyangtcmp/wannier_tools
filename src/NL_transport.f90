@@ -34,16 +34,84 @@ module nonlinear_transport
 
     !> local fine k-grids
     integer  :: Nk_fine = 5
-    integer  :: knv3_fine, ikfine, ikfinex, ikfiney, ikfinez
-    real(dp) , allocatable :: k_fine_list(:,:)
+    integer  :: knv3_fine, ikfine, ikfinex, ikfiney, ikfinez, Nk_adapt
+    real(dp) , allocatable :: k_fine_list(:,:) !> Warning! this array will not not explicit declared
 
-    integer  :: Nk_adapt
-    real(dp) :: sk_max
     integer(8), allocatable :: ik_adapt_list(:)
     real(dp), allocatable   :: sk_list(:), sk_list_mpi(:) ! the maximum of abs(sigma) at every kpoint
-    logical , allocatable   :: sk_mask(:)
+
+    integer :: ready = 1d0
 
 contains
+    subroutine get_k_fine_list()
+        use para, only: Nk1, Nk2, Nk3, K3D_vec1_cube, K3D_vec2_cube, K3D_vec3_cube
+        implicit none
+
+        if (Nk3<2) then
+            knv3_fine = Nk_fine**2
+        else 
+            knv3_fine = Nk_fine**3
+        endif
+        allocate(k_fine_list(knv3_fine,3))
+    
+        k_fine_list = 0d0
+        do ikfine=1, knv3_fine
+            if (Nk3<2) then
+                ikfinex= (ikfine-1)/(Nk_fine)+1
+                ikfiney= (ikfine-1-(ikfinex-1)*Nk_fine)+1
+                ikfinez= 1
+            else 
+                ikfinex= (ikfine-1)/(Nk_fine*Nk_fine)+1
+                ikfiney= ((ikfine-1-(ikfinex-1)*Nk_fine*Nk_fine)/Nk_fine)+1
+                ikfinez= (ikfine-(ikfiney-1)*Nk_fine- (ikfinex-1)*Nk_fine*Nk_fine)
+            endif
+            k_fine_list(ikfine,:) = K3D_vec1_cube*(ikfinex-1)/dble(Nk1*Nk_fine)  &
+                + K3D_vec2_cube*(ikfiney-1)/dble(Nk2*Nk_fine)  &
+                + K3D_vec3_cube*(ikfinez-1)/dble(Nk3*Nk_fine)
+        enddo
+    end subroutine
+
+
+    !> fixed threshold(ongoing) or relative threshold(default)
+    subroutine get_ik_adapt_list() 
+        use wmpi, only: cpuid
+        use para, only: stdout
+        implicit none
+        
+        real(dp) :: sk_max
+        logical, allocatable   :: sk_mask(:)
+        allocate( sk_mask(knv3) )
+    
+        sk_list = log(1d0 + sk_list)
+        sk_max  = maxval(sk_list)
+    
+        do icut = 1, 100
+            sk_mask = ( sk_list>=(sk_max*(1d0-icut/100d0)) )
+            if ( (sum(sk_list,mask=sk_mask)) / (sum(sk_list)) > 0.9 ) then
+                Nk_adapt = count(sk_mask)
+                if (cpuid .eq. 0) then
+                    write(stdout, '(" ")')
+                    write(stdout, '("max = ", E12.3e3, ",  threshold = ", E12.3e3)') exp(sk_max), exp((sk_max*(1d0-icut/100d0)))
+                    write(stdout, '("There are ", i15, "/", i18, "  k-points hit the threshold")') Nk_adapt, knv3
+                    write(stdout, '(" ")')
+                    write(stdout, '("Start to scan the local fine k-grids")')
+                endif
+                exit
+            endif
+        enddo
+
+        allocate( ik_adapt_list(Nk_adapt) )
+        ik_adapt_list = 0
+        l = 0
+        do ik = 1,knv3
+            if (sk_mask(ik)) then
+                l = l + 1
+                ik_adapt_list(l) = ik
+            endif
+        enddo    
+    end subroutine
+
+
     subroutine Lambda_abc_df(W, velocities, sigma_xyy_k, sigma_yxx_k)
         use para, only:  OmegaMin, OmegaMax
         implicit none
@@ -634,7 +702,7 @@ subroutine ik_to_kpoint(ik,k)
 end subroutine ik_to_kpoint
 
 
-subroutine Fermi_energy_list(energy) 
+subroutine get_Fermi_energy_list(energy) 
     !> return Fermi energy in Hatree energy, not eV
     use para, only: dp, OmegaNum, OmegaMin, OmegaMax
     implicit none
@@ -649,6 +717,5 @@ subroutine Fermi_energy_list(energy)
             energy= OmegaMin
         endif
     enddo ! ie
-end subroutine Fermi_energy_list
-
+end subroutine get_Fermi_energy_list
 
