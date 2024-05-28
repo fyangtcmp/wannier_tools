@@ -84,9 +84,14 @@ subroutine sigma_TRAHC_static
     call mpi_allreduce(sigma_tensor_mpi,sigma_tensor,size(sigma_tensor),&
                     mpi_dp,mpi_sum,mpi_cmw,ierr)
 #endif
-
+ 
     sigma_tensor(:,1:4,:)= sigma_tensor(:,1:4,:)/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume*TRAHC_factor_tau1 
     sigma_tensor(:,5:8,:)= sigma_tensor(:,5:8,:)/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume*TRAHC_factor_tau3 
+    
+    if (Nk3==1) then
+        sigma_tensor(:,1:4,:)= sigma_tensor(:,1:4,:)* Origin_cell%Ruc(3)/Ang2Bohr
+        sigma_tensor(:,5:8,:)= sigma_tensor(:,5:8,:)* Origin_cell%Ruc(3)/Ang2Bohr
+    endif
 
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
@@ -94,7 +99,8 @@ subroutine sigma_TRAHC_static
             write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
             write(ahcfilename, '(7a)')'sigma_TRAHC_eta', trim(adjustl(Eta_name)), 'meV.dat'
             open(unit=outfileindex, file=ahcfilename)
-            write(outfileindex, '("#",a)')' Third-order anomalous hall conductivity without tau, in the international System of Units '
+            write(outfileindex, '("#",a)')' Third-order anomalous hall conductivity (without tau)'
+            write(outfileindex, '("#",a)')' in unit of A*V^-3 for 3D cases, Ang*A*V^-3 for 2D cases (with tau)'
             write(outfileindex, '("#",a13, 20a16)') 'Energy (eV) ', 'xxxx/tau', ' xxyy/tau', ' yyxx/tau',  ' yyyy/tau', &
                 'xxxx/tau**3', ' xxyy/tau**3', ' yyxx/tau**3',  ' yyyy/tau**3'
             do ie=1, OmegaNum
@@ -223,14 +229,20 @@ subroutine sigma_TRAHC ! dynamical mpi version
 
     if (cpuid==0) then
         sigma_tensor(:,1:4,:)= sigma_tensor(:,1:4,:)/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume*TRAHC_factor_tau1 
-        sigma_tensor(:,5:8,:)= sigma_tensor(:,5:8,:)/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume*TRAHC_factor_tau3 
+        sigma_tensor(:,5:8,:)= sigma_tensor(:,5:8,:)/dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume*TRAHC_factor_tau3
+        
+        if (Nk3==1) then
+            sigma_tensor(:,1:4,:)= sigma_tensor(:,1:4,:)* Origin_cell%Ruc(3)/Ang2Bohr
+            sigma_tensor(:,5:8,:)= sigma_tensor(:,5:8,:)* Origin_cell%Ruc(3)/Ang2Bohr
+        endif
 
         outfileindex= outfileindex+ 1
         do ieta=1, Eta_number
             write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
             write(ahcfilename, '(7a)')'sigma_TRAHC_eta', trim(adjustl(Eta_name)), 'meV.dat'
             open(unit=outfileindex, file=ahcfilename)
-            write(outfileindex, '("#",a)')' Third-order anomalous hall conductivity without tau, in the international System of Units '
+            write(outfileindex, '("#",a)')' Third-order anomalous hall conductivity (without tau)'
+            write(outfileindex, '("#",a)')' in unit of A*V^-3 for 3D cases, Ang*A*V^-3 for 2D cases (with tau)'
             write(outfileindex, '("#",a13, 20a16)') 'Energy (eV) ', 'xxxx/tau', ' xxyy/tau', ' yyxx/tau',  ' yyyy/tau', &
                 'xxxx/tau**3', ' xxyy/tau**3', ' yyxx/tau**3',  ' yyyy/tau**3'
             do ie=1, OmegaNum
@@ -319,6 +331,11 @@ subroutine sigma_ISOAHC
     !> the sigma_xyy contains an additional [energy]^-1 dimension, so besides e^3/hbar, we need to convert hartree to joule
     sigma_xyy= sigma_xyy * SOAHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
     sigma_yxx= sigma_yxx * SOAHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+    
+    if (Nk3==1) then
+        sigma_xyy= sigma_xyy * Origin_cell%Ruc(3)/Ang2Bohr
+        sigma_yxx= sigma_yxx * Origin_cell%Ruc(3)/Ang2Bohr
+    endif
 
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
@@ -326,8 +343,8 @@ subroutine sigma_ISOAHC
             write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
             write(ahcfilename, '(7a)')'sigma_ISOAHC_eta', trim(adjustl(Eta_name)), 'meV.dat'
             open(unit=outfileindex, file=ahcfilename)
-            write(outfileindex, '("#",a)')' Intrinsic 2nd anomalous hall conductivity, in unit of A.V^-2 for 3D cases.'
-            write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
+            write(outfileindex, '("#",a)')' Intrinsic 2nd anomalous hall conductivity'
+            write(outfileindex, '("#",a)')' in unit of A*V^-2 for 3D cases, Ang*A*V^-2 for 2D cases'
             write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyy', '\sigma_yxx'
             do ie=1, OmegaNum
                 write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, sigma_xyy(ie,ieta), &
@@ -451,6 +468,11 @@ subroutine sigma_INPHC_static
     Chi_xyyy_tensor = Chi_xyyy_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
     Chi_yxxx_tensor = Chi_yxxx_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
 
+    if (Nk3==1) then
+        Chi_xyyy_tensor = Chi_xyyy_tensor* Origin_cell%Ruc(3)/Ang2Bohr
+        Chi_yxxx_tensor = Chi_yxxx_tensor* Origin_cell%Ruc(3)/Ang2Bohr
+    endif
+
     outfileindex= outfileindex+ 1
     if (cpuid.eq.0) then
         do ieta=1, Eta_number
@@ -459,7 +481,7 @@ subroutine sigma_INPHC_static
             if (include_m_spin) then
                 write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
-                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
+                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D cases, Ang*A*V^-2*T^-1 for 2D cases'
                 write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
 
                 write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy_I', '\sigma_xyyy_II', '\sigma_xyyy_tot', '\sigma_yxxx_I', '\sigma_yxxx_II','\sigma_yxxx_tot'
@@ -474,8 +496,8 @@ subroutine sigma_INPHC_static
             if (include_m_orb ) then
                 write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
-                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
-                write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
+                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D case, Ang*A*V^-2*T^-1 for 2D cases'
+                write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
 
                 write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy_I', '\sigma_xyyy_II', '\sigma_xyyy_tot', '\sigma_yxxx_I', '\sigma_yxxx_II','\sigma_yxxx_tot'
                 do ie=1, OmegaNum
@@ -551,7 +573,7 @@ subroutine sigma_INPHC ! dynamical mpi version
         do ik= 1, (knv3+num_cpu-1)
             if (mod(ik, 2000*(num_cpu-1))==0) then
                 call now(time_end)
-                write(stdout, '(a, i18, "/", i18, a, f10.2, "min, speed may change due to the adaptive mesh")') 'ik/knv3', &
+                write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/knv3', &
                     ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/(num_cpu-1)/2000d0/60d0
                 time_start= time_end
             endif
@@ -625,6 +647,11 @@ subroutine sigma_INPHC ! dynamical mpi version
         Chi_xyyy_tensor = Chi_xyyy_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
         Chi_yxxx_tensor = Chi_yxxx_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
 
+        if (Nk3==1) then
+            Chi_xyyy_tensor = Chi_xyyy_tensor* Origin_cell%Ruc(3)/Ang2Bohr
+            Chi_yxxx_tensor = Chi_yxxx_tensor* Origin_cell%Ruc(3)/Ang2Bohr
+        endif
+
         outfileindex= outfileindex+ 1
         do ieta=1, Eta_number
             write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
@@ -632,7 +659,7 @@ subroutine sigma_INPHC ! dynamical mpi version
             if (include_m_spin) then
                 write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
-                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
+                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D case, Ang*A*V^-2*T^-1 for 2D cases'
                 write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
 
                 write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy_I', '\sigma_xyyy_II', '\sigma_xyyy_tot', '\sigma_yxxx_I', '\sigma_yxxx_II','\sigma_yxxx_tot'
@@ -647,8 +674,8 @@ subroutine sigma_INPHC ! dynamical mpi version
             if (include_m_orb ) then
                 write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
-                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1'
-                write(outfileindex, '("#",a)')' For 2D cases, you need to multiply the 3rd lattice vector in SI unit'
+                write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D case, Ang*A*V^-2*T^-1 for 2D cases'
+                write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
 
                 write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy_I', '\sigma_xyyy_II', '\sigma_xyyy_tot', '\sigma_yxxx_I', '\sigma_yxxx_II','\sigma_yxxx_tot'
                 do ie=1, OmegaNum

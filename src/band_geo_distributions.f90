@@ -7,17 +7,16 @@ subroutine band_geo_props_kplane
     
     use wmpi
     use para
+    use nonlinear_transport
     implicit none
    
-    integer  :: ik, i, j, ierr, nkmesh
+    integer  :: i, j, nkmesh
 
-    real(dp) :: k(3), kxy_plane(3)
+    real(dp) :: kxy_plane(3)
 
     !> k points slice
     real(dp), allocatable :: kslice(:, :), kslice_xyz(:, :)
   
-    real(dp) :: time_start, time_end
-
     real(dp), allocatable :: props(:,:), props_mpi(:,:)
 
     nkmesh= Nk1*Nk2
@@ -26,6 +25,12 @@ subroutine band_geo_props_kplane
 
     allocate( kslice(nkmesh, 3))
     allocate( kslice_xyz(nkmesh, 3))
+
+    allocate( energy(1) )
+    energy = 0d0
+
+    Eta_array(1) = Eta_Arc !> from wt.in
+    Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
 
     props= 0d0
     props_mpi= 0d0
@@ -82,8 +87,6 @@ subroutine band_geo_props_kplane
         close(outfileindex)
 
     endif
-
-    return
 
 end subroutine
 
@@ -171,132 +174,26 @@ subroutine INPHC_dist_single_k_Ef(k_in, props)
 
     real(dp), intent(in)  :: k_in(3)
     real(dp), intent(out) :: props(6)
-    real(dp) :: diffFermi
 
-    complex(dp), allocatable :: M_S(:, :, :) !> spin magnetic moments
-    complex(dp), allocatable :: M_L(:, :, :) !> orbital magnetic moments
+    real(dp), allocatable :: Chi_xyyy_k         (:,:,:,:)
+    real(dp), allocatable :: Chi_yxxx_k         (:,:,:,:)
+    real(dp), allocatable :: Chi_xyyx_k         (:,:,:,:)
+    real(dp), allocatable :: Chi_yxxy_k         (:,:,:,:)
+
+    allocate( Chi_xyyy_k         (OmegaNum, Eta_number,2,2))
+    allocate( Chi_yxxx_k         (OmegaNum, Eta_number,2,2))
+    allocate( Chi_xyyx_k         (OmegaNum, Eta_number,2,2))
+    allocate( Chi_yxxy_k         (OmegaNum, Eta_number,2,2))
     
-    ! eigen value of H
-    real(dp),    allocatable :: W(:)
-    complex(dp), allocatable :: Hamk_bulk(:, :)
-    complex(dp), allocatable :: Amat(:, :)
-    complex(dp), allocatable :: UU(:, :)
-    complex(dp), allocatable :: UU_dag(:, :)
+    call sigma_INPHC_single_k(  k_in, Chi_xyyy_k, Chi_yxxx_k)
+    call sigma_INPHC_single_k_2(k_in, Chi_xyyx_k, Chi_yxxy_k)
 
-    complex(dp), allocatable :: sx(:, :), sy(:, :), sz(:, :)
-    complex(dp), allocatable :: vx(:, :), vy(:, :)
-    complex(dp), allocatable :: velocities(:,:,:)
+    props(1) = sum(Chi_xyyy_k(1,1,:,:))
+    props(2) = sum(Chi_yxxx_k(1,1,:,:))
+    props(3) = sum(Chi_xyyx_k(1,1,:,:))
+    props(4) = sum(Chi_yxxy_k(1,1,:,:))
+    props(5) = 0d0
+    props(6) = 0d0
 
-    real(dp) :: G_xx, G_xy, G_yx, G_yy
-    real(dp) :: Lambda_xyy, Lambda_yyy, Lambda_yxx, Lambda_xxx
-    real(dp) :: dEnm, dEnm3, dEml, dEnl
-    
-    allocate( W (Num_wann))
-    allocate( Hamk_bulk (Num_wann, Num_wann))
-    allocate( Amat (Num_wann, Num_wann))
-    allocate( UU (Num_wann, Num_wann))
-    allocate( UU_dag (Num_wann, Num_wann))
-
-    allocate( velocities(Num_wann, Num_wann, 3))
-    allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
-    allocate( sx(Num_wann, Num_wann), sy(Num_wann, Num_wann), sz(Num_wann, Num_wann))
-
-    call ham_bulk_latticegauge(k_in, Hamk_bulk)
-    UU=Hamk_bulk
-    call eigensystem_c( 'V', 'U', Num_wann, UU, W)
-    UU_dag= conjg(transpose(UU))
-    call velocity_latticegauge_simple(k_in, UU, velocities)
-    vx = velocities(:,:,1)
-    vy = velocities(:,:,2)
-
-    !===========================================================================
-    !> magnetic operators 
-    allocate( M_S(Num_wann, Num_wann,3) )
-    allocate( M_L(Num_wann, Num_wann,3) )
-
-    M_S = 0d0
-    M_L = 0d0
-    if (include_m_spin) then
-        call spin_magnetic_moments(M_S)
-
-        call mat_mul(Num_wann, M_S(:,:,1), UU, Amat)
-        call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,1)) 
-        call mat_mul(Num_wann, M_S(:,:,2), UU, Amat) 
-        call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,2))
-        ! call mat_mul(Num_wann, M_S(:,:,3), UU, Amat)
-        ! call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,3))
-    endif
-    if (include_m_orb) then
-        call orbital_magnetic_moments(W, velocities, M_L)
-    endif
-
-    sx = -0.5d0 * Lande_g_S * M_S(:,:,1)! + Lande_g_L * M_L(:,:,1)
-    sy = -0.5d0 * Lande_g_S * M_S(:,:,2) !+ Lande_g_L * M_L(:,:,2)
-    sz = -0.5d0 * Lande_g_S * M_S(:,:,3) !+ Lande_g_L * M_L(:,:,3)
-
-    n = Numoccupied
-    ! do n= 1, Num_wann
-        G_xx= 0d0
-        G_xy= 0d0
-        G_yx= 0d0
-        G_yy= 0d0
-       
-        Lambda_xyy= 0d0
-        Lambda_yyy= 0d0
-        Lambda_yxx= 0d0
-        Lambda_xxx= 0d0
-
-        do m= 1, Num_wann
-            dEnm= W(n) - W(m)           
-            if (ABS(dEnm) < band_degeneracy_threshold) cycle
-
-            dEnm3= dEnm**3
-            G_xx= G_xx+ 2.d0*real( vx(n, m)*vx(m, n) )/dEnm3
-            G_xy= G_xy+ 2.d0*real( vx(n, m)*vy(m, n) )/dEnm3
-            G_yx= G_yx+ 2.d0*real( vy(n, m)*vx(m, n) )/dEnm3
-            G_yy= G_yy+ 2.d0*real( vy(n, m)*vy(m, n) )/dEnm3
-
-            Lambda_xyy= Lambda_xyy + 6.d0* real( vx(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
-            Lambda_yyy= Lambda_yyy + 6.d0* real( vy(n, m)*vy(m, n)*(sy(n, n)-sy(m, m)) )/dEnm3/dEnm
-            Lambda_yxx= Lambda_yxx + 6.d0* real( vy(n, m)*vx(m, n)*(sx(n, n)-sx(m, m)) )/dEnm3/dEnm
-            Lambda_xxx= Lambda_xxx + 6.d0* real( vx(n, m)*vx(m, n)*(sx(n, n)-sx(m, m)) )/dEnm3/dEnm
-            
-            do l= 1, Num_wann
-                dEnl= W(n)-W(l)
-                dEml= W(m)-W(l)                    
-                if (ABS(dEnl) > band_degeneracy_threshold) then
-                    Lambda_xyy= Lambda_xyy - 2.d0* real( (vx(l, m)*vy(m, n)+vy(l, m)*vx(m, n)) *sy(n, l)) /dEnm3/dEnl
-                    Lambda_yyy= Lambda_yyy - 2.d0* real( (vy(l, m)*vy(m, n)+vy(l, m)*vy(m, n)) *sy(n, l)) /dEnm3/dEnl
-                    Lambda_yxx= Lambda_yxx - 2.d0* real( (vy(l, m)*vx(m, n)+vx(l, m)*vy(m, n)) *sx(n, l)) /dEnm3/dEnl
-                    Lambda_xxx= Lambda_xxx - 2.d0* real( (vx(l, m)*vx(m, n)+vx(l, m)*vx(m, n)) *sx(n, l)) /dEnm3/dEnl
-                endif
-                if (ABS(dEml) > band_degeneracy_threshold) then
-                    Lambda_xyy= Lambda_xyy - 2.d0* real( (vx(l, n)*vy(n, m)+vy(l, n)*vx(n, m)) *sy(m, l)) /dEnm3/dEml
-                    Lambda_yyy= Lambda_yyy - 2.d0* real( (vy(l, n)*vy(n, m)+vy(l, n)*vy(n, m)) *sy(m, l)) /dEnm3/dEml
-                    Lambda_yxx= Lambda_yxx - 2.d0* real( (vy(l, n)*vx(n, m)+vx(l, n)*vy(n, m)) *sx(m, l)) /dEnm3/dEml
-                    Lambda_xxx= Lambda_xxx - 2.d0* real( (vx(l, n)*vx(n, m)+vx(l, n)*vx(n, m)) *sx(m, l)) /dEnm3/dEml
-                endif
-            enddo ! l
-
-        enddo ! m
-
-        if (W(n)/Eta_Arc<50) then
-            diffFermi= -Exp(W(n)/Eta_Arc)/(Exp(W(n)/Eta_Arc)+1d0)**2 /Eta_Arc
-        else
-            diffFermi=0d0
-        endif
-
-        props(1) = props(1) + G_xx * diffFermi
-        props(2) = props(2) + G_xy * diffFermi
-        props(3) = props(3) + G_yx * diffFermi
-        props(4) = props(4) + G_yy * diffFermi
-        props(5) = props(5) + Lambda_xyy * diffFermi
-        props(6) = props(6) + Lambda_yxx * diffFermi
-    ! enddo ! n
-
-    deallocate(W, vx, vy, Hamk_bulk, Amat, UU, UU_dag, velocities)
-    deallocate(sx, sy, sz)
-    deallocate(M_S, M_L)
-    return
 
 end subroutine
