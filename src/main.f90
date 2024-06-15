@@ -796,6 +796,16 @@
          if(cpuid.eq.0)write(stdout, *)
       endif
 
+      if (sigma_NPHC_tau2_calc)then
+         if(cpuid.eq.0)write(stdout, *)' '
+         if(cpuid.eq.0)write(stdout, *)
+         call now(time_start)
+         call sigma_NPHC_tau2
+         call now(time_end)
+         call print_time_cost(time_start, time_end, 'sigma_NPHC_tau2')
+         if(cpuid.eq.0)write(stdout, *)
+      endif
+
       !> calculate the distributions of user defined band geometry properties
       if (band_geo_props_kplane_calc)then
          if(cpuid.eq.0)write(stdout, *)' '

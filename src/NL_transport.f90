@@ -220,9 +220,7 @@ contains
         ! eigen value of H
         real(dp),    allocatable :: W(:)
         complex(dp), allocatable :: Hamk_bulk(:, :)
-        complex(dp), allocatable :: Amat(:, :)
         complex(dp), allocatable :: UU(:, :)
-        complex(dp), allocatable :: UU_dag(:, :)
     
         real(dp), allocatable :: W_dkx(:)
         real(dp), allocatable :: W_dky(:)
@@ -246,9 +244,7 @@ contains
         !> original kpoints
         allocate( W (Num_wann))
         allocate( Hamk_bulk (Num_wann, Num_wann))
-        allocate( Amat (Num_wann, Num_wann))
         allocate( UU (Num_wann, Num_wann))
-        allocate( UU_dag (Num_wann, Num_wann))
     
         allocate( velocities(Num_wann, Num_wann, 3))
         allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
@@ -258,7 +254,6 @@ contains
         call ham_bulk_latticegauge(k_in, Hamk_bulk)
         UU=Hamk_bulk
         call eigensystem_c( 'V', 'U', Num_wann, UU, W)
-        UU_dag= conjg(transpose(UU))
         call velocity_latticegauge_simple(k_in, UU, velocities)
         vx = velocities(:,:,1)
         vy = velocities(:,:,2)
@@ -271,18 +266,14 @@ contains
         M_S = 0d0
         M_L = 0d0
         if (include_m_spin) then
-            call spin_magnetic_moments(M_S)
-            call mat_mul(Num_wann, M_S(:,:,1), UU, Amat)
-            call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,1)) 
-            call mat_mul(Num_wann, M_S(:,:,2), UU, Amat) 
-            call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,2))
-            sx = -0.5d0 * Lande_g_S * M_S(:,:,1)
-            sy = -0.5d0 * Lande_g_S * M_S(:,:,2)
+            call spin_magnetic_moments(UU, M_S)
+            sx = M_S(:,:,1)
+            sy = M_S(:,:,2)
         endif
         if (include_m_orb) then
             call orbital_magnetic_moments(W, velocities, M_L)
-            lx = Lande_g_L * M_L(:,:,1)
-            ly = Lande_g_L * M_L(:,:,2)
+            lx = M_L(:,:,1)
+            ly = M_L(:,:,2)
         endif    
     
         !> k + dk_x <===============================================================
@@ -425,6 +416,170 @@ contains
     end subroutine
 
 
+    subroutine sigma_NPHC_tau2_single_k(k_in, Chi_xyyy_k, Chi_yxxx_k)
+        use magnetic_moments
+        use para
+        implicit none
+    
+        real(dp), intent(in)  :: k_in(3)
+        real(dp), intent(out) :: Chi_xyyy_k(OmegaNum, Eta_number, 2, 2) !> the third index: 1=spin, 2=orbital
+        real(dp), intent(out) :: Chi_yxxx_k(OmegaNum, Eta_number, 2, 2)
+    
+        complex(dp), allocatable :: M_S(:, :, :) !> spin magnetic moments
+        complex(dp), allocatable :: M_L(:, :, :) !> orbital magnetic moments
+            
+        real(dp) :: k_dkx(3)
+        real(dp) :: k_dky(3)
+        
+        real(dp), allocatable :: Fshort(:) !> short notation of the denominator of the Fermi distribution
+        real(dp), allocatable :: diffFermi(:), diff2Fermi(:)
+
+        ! eigen value of H
+        real(dp),    allocatable :: W(:)
+        complex(dp), allocatable :: Hamk_bulk(:, :)
+        complex(dp), allocatable :: UU(:, :)
+    
+        real(dp), allocatable :: W_dkx(:)
+        real(dp), allocatable :: W_dky(:)
+    
+        complex(dp), allocatable :: sx(:, :), sy(:, :)
+        complex(dp), allocatable :: lx(:, :), ly(:, :)
+        complex(dp), allocatable :: vx(:, :), vy(:, :)
+        complex(dp), allocatable :: velocities(:,:,:)
+    
+        complex(dp), allocatable :: vx_dkx(:, :), vy_dkx(:, :)  
+        complex(dp), allocatable :: vx_dky(:, :), vy_dky(:, :)
+        complex(dp), allocatable :: sy_dkx(:, :), ly_dkx(:, :)  
+        complex(dp), allocatable :: sx_dky(:, :), lx_dky(:, :) 
+    
+        real(dp) :: alpha_xyyy_S, alpha_xyyy_L, alpha_yxxx_S, alpha_yxxx_L
+        
+        allocate( Fshort(OmegaNum), diffFermi(OmegaNum), diff2Fermi(OmegaNum))
+
+        !===========================================================================
+        !> original kpoints
+        allocate( W (Num_wann))
+        allocate( Hamk_bulk (Num_wann, Num_wann))
+        allocate( UU (Num_wann, Num_wann))
+    
+        allocate( velocities(Num_wann, Num_wann, 3))
+        allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
+        allocate( sx(Num_wann, Num_wann), sy(Num_wann, Num_wann))
+        allocate( lx(Num_wann, Num_wann), ly(Num_wann, Num_wann))
+    
+        call ham_bulk_latticegauge(k_in, Hamk_bulk)
+        UU=Hamk_bulk
+        call eigensystem_c( 'V', 'U', Num_wann, UU, W)
+        call velocity_latticegauge_simple(k_in, UU, velocities)
+        vx = velocities(:,:,1)
+        vy = velocities(:,:,2)
+    
+        !> magnetic mats
+        allocate( M_S(Num_wann, Num_wann,3) )
+        allocate( M_L(Num_wann, Num_wann,3) )
+    
+        M_S = 0d0
+        M_L = 0d0
+        if (include_m_spin) then
+            call spin_magnetic_moments(UU, M_S)
+            sx = M_S(:,:,1)
+            sy = M_S(:,:,2)
+        endif
+        if (include_m_orb) then
+            call orbital_magnetic_moments(W, velocities, M_L)
+            lx = M_L(:,:,1)
+            ly = M_L(:,:,2)
+        endif    
+    
+        !> k + dk_x <===============================================================
+        allocate( W_dkx (Num_wann))   
+        allocate( vx_dkx(Num_wann, Num_wann), vy_dkx(Num_wann, Num_wann))
+        allocate( sy_dkx(Num_wann, Num_wann), ly_dkx(Num_wann, Num_wann))
+    
+        k_dkx = k_in+(/Origin_cell%Rua(1)*dkx , Origin_cell%Rub(1)*dkx , Origin_cell%Ruc(1)*dkx/)/twopi
+    
+        call ham_bulk_latticegauge(k_dkx, Hamk_bulk)
+        UU=Hamk_bulk
+        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dkx)
+        call velocity_latticegauge_simple(k_dkx, UU, velocities)
+        vx_dkx = velocities(:,:,1)
+        vy_dkx = velocities(:,:,2)
+
+        if (include_m_spin) then
+            call spin_magnetic_moments(UU, M_S)
+            sy_dkx = M_S(:,:,2)
+        endif
+        if (include_m_orb) then
+            call orbital_magnetic_moments(W_dkx, velocities, M_L)
+            ly_dkx = M_L(:,:,2)
+        endif  
+        !===========================================================================
+    
+        !> k + dk_y <===============================================================
+        allocate( W_dky (Num_wann))
+        allocate( vx_dky(Num_wann, Num_wann), vy_dky(Num_wann, Num_wann))
+        allocate( sx_dky(Num_wann, Num_wann), lx_dky(Num_wann, Num_wann))
+    
+        k_dky = k_in+(/Origin_cell%Rua(2)*dky , Origin_cell%Rub(2)*dky , Origin_cell%Ruc(2)*dky/)/twopi
+    
+        call ham_bulk_latticegauge(k_dky, Hamk_bulk)
+        UU=Hamk_bulk
+        call eigensystem_c( 'V', 'U', Num_wann, UU, W_dky)
+        call velocity_latticegauge_simple(k_dky, UU, velocities)
+        vx_dky = velocities(:,:,1)
+        vy_dky = velocities(:,:,2)
+
+        if (include_m_spin) then
+            call spin_magnetic_moments(UU, M_S)
+            sx_dky = M_S(:,:,1)
+        endif
+        if (include_m_orb) then
+            call orbital_magnetic_moments(W_dky, velocities, M_L)
+            lx_dky = M_L(:,:,1)
+        endif  
+        !===========================================================================
+    
+        Chi_xyyy_k = 0d0
+        Chi_yxxx_k = 0d0
+    
+        do n= 1, Num_wann
+            if (W(n)<OmegaMin- 2.d-2 .or. W(n)>OmegaMax+ 2.d-2) cycle !> prevent NaN error
+
+            alpha_xyyy_S= 0d0
+            alpha_yxxx_S= 0d0
+            alpha_xyyy_L= 0d0
+            alpha_yxxx_L= 0d0
+
+            if (include_m_spin) then
+                alpha_xyyy_S = real( (sy_dkx(n,n) - sy(n,n))/dkx*(vy(n,n)**2) - (vy_dky(n,n) - vy(n,n))/dky*sy(n,n)*vx(n,n) )
+                alpha_yxxx_S = real( (sx_dky(n,n) - sx(n,n))/dky*(vx(n,n)**2) - (vx_dkx(n,n) - vx(n,n))/dkx*sx(n,n)*vy(n,n) )
+            endif
+
+            if (include_m_orb) then
+                alpha_xyyy_L = real( (ly_dkx(n,n) - ly(n,n))/dkx*(vy(n,n)**2) - (vy_dky(n,n) - vy(n,n))/dky*ly(n,n)*vx(n,n) )
+                alpha_yxxx_L = real( (lx_dky(n,n) - lx(n,n))/dky*(vx(n,n)**2) - (vx_dkx(n,n) - vx(n,n))/dkx*lx(n,n)*vy(n,n) )
+            endif
+    
+            do ieta=1, Eta_number
+                Fshort = Exp((W(n)-energy)/Eta_array(ieta))
+                !> this format is very important! prevent NaN error
+                diffFermi  = -1d0 / (Fshort+1d0) / (1d0/Fshort+1d0) / Eta_array(ieta)
+                diff2Fermi = diffFermi * ( 1d0 - 2d0 / (1d0/Fshort+1d0)) / Eta_array(ieta)
+
+                if (include_m_spin) then
+                    Chi_xyyy_k(:,ieta, 1, 1) = Chi_xyyy_k(:,ieta, 1, 1) + alpha_xyyy_S * diff2Fermi
+                    Chi_yxxx_k(:,ieta, 1, 1) = Chi_yxxx_k(:,ieta, 1, 1) + alpha_yxxx_S * diff2Fermi
+                endif
+                if (include_m_orb) then
+                    Chi_xyyy_k(:,ieta, 2, 1) = Chi_xyyy_k(:,ieta, 2, 1) + alpha_xyyy_L * diff2Fermi
+                    Chi_yxxx_k(:,ieta, 2, 1) = Chi_yxxx_k(:,ieta, 2, 1) + alpha_yxxx_L * diff2Fermi
+                endif
+            enddo ! ieta
+        enddo ! n
+    
+    end subroutine
+
+
     subroutine sigma_INPHC_single_k_2(k_in, Chi_xyyx_k, Chi_yxxy_k)
         use magnetic_moments
         use para
@@ -445,9 +600,7 @@ contains
         ! eigen value of H
         real(dp),    allocatable :: W(:)
         complex(dp), allocatable :: Hamk_bulk(:, :)
-        complex(dp), allocatable :: Amat(:, :)
         complex(dp), allocatable :: UU(:, :)
-        complex(dp), allocatable :: UU_dag(:, :)
     
         real(dp), allocatable :: W_dkx(:)
         real(dp), allocatable :: W_dky(:)
@@ -471,9 +624,7 @@ contains
         !> original kpoints
         allocate( W (Num_wann))
         allocate( Hamk_bulk (Num_wann, Num_wann))
-        allocate( Amat (Num_wann, Num_wann))
         allocate( UU (Num_wann, Num_wann))
-        allocate( UU_dag (Num_wann, Num_wann))
     
         allocate( velocities(Num_wann, Num_wann, 3))
         allocate( vx(Num_wann, Num_wann), vy(Num_wann, Num_wann))
@@ -483,7 +634,6 @@ contains
         call ham_bulk_latticegauge(k_in, Hamk_bulk)
         UU=Hamk_bulk
         call eigensystem_c( 'V', 'U', Num_wann, UU, W)
-        UU_dag= conjg(transpose(UU))
         call velocity_latticegauge_simple(k_in, UU, velocities)
         vx = velocities(:,:,1)
         vy = velocities(:,:,2)
@@ -496,18 +646,14 @@ contains
         M_S = 0d0
         M_L = 0d0
         if (include_m_spin) then
-            call spin_magnetic_moments(M_S)
-            call mat_mul(Num_wann, M_S(:,:,1), UU, Amat)
-            call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,1)) 
-            call mat_mul(Num_wann, M_S(:,:,2), UU, Amat) 
-            call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,2))
-            sx = -0.5d0 * Lande_g_S * M_S(:,:,1)
-            sy = -0.5d0 * Lande_g_S * M_S(:,:,2)
+            call spin_magnetic_moments(UU, M_S)
+            sx = M_S(:,:,1)
+            sy = M_S(:,:,2)
         endif
         if (include_m_orb) then
             call orbital_magnetic_moments(W, velocities, M_L)
-            lx = Lande_g_L * M_L(:,:,1)
-            ly = Lande_g_L * M_L(:,:,2)
+            lx = M_L(:,:,1)
+            ly = M_L(:,:,2)
         endif    
     
         !> k + dk_x <===============================================================

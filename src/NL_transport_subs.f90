@@ -691,6 +691,184 @@ subroutine sigma_INPHC ! dynamical mpi version
 end subroutine
 
 
+subroutine sigma_NPHC_tau2 ! dynamical mpi version
+    !> Calculate the tau^2 nonlinear planar Hall conductivity, the xyyy and yxxx elements
+    !
+    !> ref: DOI: 10.1103/PhysRevB.108.075155, eq(18)
+    !
+    !> usage: sigma_NPHC_tau2_calc = T
+    !
+    !> 2024/05/30 Fan Yang
+    !
+
+    use wmpi
+    use para
+    use nonlinear_transport
+    implicit none
+
+    real(dp), parameter :: NPHC_tau2_unit_factor = - Echarge**3/hbar**3 *Hartree2J* mu_B
+
+    real(dp), allocatable :: Chi_xyyy_k         (:,:,:,:)
+    real(dp), allocatable :: Chi_yxxx_k         (:,:,:,:)
+    real(dp), allocatable :: Chi_xyyy_tensor    (:,:,:,:)
+    real(dp), allocatable :: Chi_yxxx_tensor    (:,:,:,:)
+    real(dp), allocatable :: Chi_xyyy_tensor_mpi(:,:,:,:)
+    real(dp), allocatable :: Chi_yxxx_tensor_mpi(:,:,:,:)
+
+    real(dp) :: max_tmp(2)
+
+    Eta_array(1) = Eta_Arc !> from wt.in
+    Eta_array(2:Eta_number) = Eta_array_fixed(1:Eta_number-1)
+
+    allocate( Chi_xyyy_k         (OmegaNum, Eta_number,2,2))
+    allocate( Chi_yxxx_k         (OmegaNum, Eta_number,2,2))
+    allocate( Chi_xyyy_tensor    (OmegaNum, Eta_number,2,2))
+    allocate( Chi_yxxx_tensor    (OmegaNum, Eta_number,2,2))
+    allocate( Chi_xyyy_tensor_mpi(OmegaNum, Eta_number,2,2))
+    allocate( Chi_yxxx_tensor_mpi(OmegaNum, Eta_number,2,2))
+
+    Chi_xyyy_tensor     = 0d0
+    Chi_yxxx_tensor     = 0d0
+    Chi_xyyy_tensor_mpi = 0d0
+    Chi_yxxx_tensor_mpi = 0d0
+
+    allocate( energy(OmegaNum))
+    call get_Fermi_energy_list(energy)
+
+    !> each k point
+    knv3= int8(Nk1)*Nk2*Nk3
+
+    call get_k_fine_list()
+
+    allocate( sk_list_mpi(knv3))
+    allocate( sk_list    (knv3))
+    sk_list_mpi = 0
+    sk_list = 0
+
+#if defined (MPI)
+    if (cpuid==0) then ! dispatcher
+        call now(time_start)
+        do ik= 1, (knv3+num_cpu-1)
+            if (mod(ik, 2000*(num_cpu-1))==0) then
+                call now(time_end)
+                write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/knv3', &
+                    ik, knv3, '  time left', (knv3-ik)*(time_end-time_start)/(num_cpu-1)/2000d0/60d0
+                time_start= time_end
+            endif
+    
+            call MPI_Recv(ready, 1, mpi_in, mpi_any_source,       0, mpi_cmw, mpistatus, ierr)
+            call MPI_Send(ik,    1, mpi_in, mpistatus.MPI_SOURCE, 0, mpi_cmw, ierr)       
+        enddo ! ik
+    else ! workers
+        ! loop until all the kpoints have been scanned
+        do while (.True.)
+            call MPI_Send(ready, 1, mpi_in, 0, 0, mpi_cmw, ierr)
+            call MPI_Recv(ik,    1, mpi_in, 0, 0, mpi_cmw, mpistatus, ierr)
+
+            if (ik>knv3) exit
+            call ik_to_kpoint(ik,k)
+            call sigma_NPHC_tau2_single_k(k, Chi_xyyy_k, Chi_yxxx_k)
+
+            max_tmp(1) = maxval(abs(Chi_xyyy_k))
+            max_tmp(2) = maxval(abs(Chi_yxxx_k))
+            sk_list_mpi(ik) = maxval( max_tmp )
+        enddo
+    endif
+
+    call mpi_barrier(mpi_cmw,ierr)
+    call mpi_reduce(sk_list_mpi,sk_list,size(sk_list),mpi_dp,mpi_sum,0,mpi_cmw,ierr)
+
+    if (cpuid==0) then ! dispatcher
+        call get_ik_adapt_list()
+        call now(time_start)
+        do ik2= 1, (Nk_adapt+num_cpu-1)
+            if (mod(ik2, 200*(num_cpu-1))==0) then
+                call now(time_end)
+                write(stdout, '(a, i18, "/", i18, a, f10.2, "min")') 'ik/Nk_adapt', &
+                    ik2, Nk_adapt, '  time left', (Nk_adapt-ik2)*(time_end-time_start)/(num_cpu-1)/200d0/60d0
+                time_start= time_end
+            endif
+
+            if (ik2>Nk_adapt) then !> exit workers
+                ik = knv3 + 1
+            else
+                ik = ik_adapt_list(ik2)
+            endif
+                
+            call MPI_Recv(ready, 1, mpi_in, mpi_any_source,    0, mpi_cmw, mpistatus, ierr)    
+            call MPI_Send(ik,    1, mpi_in, mpistatus.MPI_SOURCE, 0, mpi_cmw, ierr)  
+        enddo ! ik
+
+    else ! workers
+        do while (.True.)
+            call MPI_Send(ready, 1, mpi_in, 0, 0, mpi_cmw, ierr)  
+            call MPI_Recv(ik,    1, mpi_in, 0, 0, mpi_cmw, mpistatus, ierr)
+            !> MPI_sendrecv slower than individual MPI_send and MPI_recv
+            ! call MPI_sendrecv(ready, 1, mpi_in, 0, 0, ik, 1, mpi_in, 0, 0, mpi_cmw, mpistatus, ierr) 
+
+            if (ik>knv3) exit
+            call ik_to_kpoint(ik,k)
+            do ikfine=1, knv3_fine
+                call sigma_NPHC_tau2_single_k(k + k_fine_list(ikfine,:), Chi_xyyy_k, Chi_yxxx_k)
+    
+                Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi + Chi_xyyy_k/dble(knv3_fine)
+                Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi + Chi_yxxx_k/dble(knv3_fine)
+            enddo
+        enddo
+    endif
+
+    call mpi_reduce(Chi_xyyy_tensor_mpi, Chi_xyyy_tensor, size(Chi_xyyy_tensor), mpi_dp,mpi_sum, 0, mpi_cmw,ierr)
+    call mpi_reduce(Chi_yxxx_tensor_mpi, Chi_yxxx_tensor, size(Chi_yxxx_tensor), mpi_dp,mpi_sum, 0, mpi_cmw,ierr)
+#endif
+
+    if (cpuid==0) then
+        Chi_xyyy_tensor = Chi_xyyy_tensor * NPHC_tau2_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+        Chi_yxxx_tensor = Chi_yxxx_tensor * NPHC_tau2_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+
+        if (Nk3==1) then
+            Chi_xyyy_tensor = Chi_xyyy_tensor* Origin_cell%Ruc(3)/Ang2Bohr
+            Chi_yxxx_tensor = Chi_yxxx_tensor* Origin_cell%Ruc(3)/Ang2Bohr
+        endif
+
+        outfileindex= outfileindex+ 1
+        do ieta=1, Eta_number
+            write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
+
+            if (include_m_spin) then
+                write(ahcfilename, '(7a)')'sigma_NPHC_tau2_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
+                open(unit=outfileindex, file=ahcfilename)
+                write(outfileindex, '("#",a)')' tau2 nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D case, Ang*A*V^-2*T^-1 for 2D cases'
+                write(outfileindex, '("#",a)')' Without Tau'
+
+                write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy_I', '\sigma_xyyy_II', '\sigma_xyyy_tot', '\sigma_yxxx_I', '\sigma_yxxx_II','\sigma_yxxx_tot'
+                do ie=1, OmegaNum
+                    write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, &
+                        Chi_xyyy_tensor(ie,ieta,1,1), Chi_xyyy_tensor(ie,ieta,1,2), Chi_xyyy_tensor(ie,ieta,1,1) + Chi_xyyy_tensor(ie,ieta,1,2),&
+                        Chi_yxxx_tensor(ie,ieta,1,1), Chi_yxxx_tensor(ie,ieta,1,2), Chi_yxxx_tensor(ie,ieta,1,1) + Chi_yxxx_tensor(ie,ieta,1,2)
+                enddo
+                close(outfileindex)
+            endif
+
+            if (include_m_orb ) then
+                write(ahcfilename, '(7a)')'sigma_NPHC_tau2_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
+                open(unit=outfileindex, file=ahcfilename)
+                write(outfileindex, '("#",a)')' tau2 nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D case, Ang*A*V^-2*T^-1 for 2D cases'
+                write(outfileindex, '("#",a)')' Without Tau'
+
+                write(outfileindex, '("#",a13, 20a16)')' Energy (eV)', '\sigma_xyyy_I', '\sigma_xyyy_II', '\sigma_xyyy_tot', '\sigma_yxxx_I', '\sigma_yxxx_II','\sigma_yxxx_tot'
+                do ie=1, OmegaNum
+                    write(outfileindex, '(200E16.8)')energy(ie)/eV2Hartree, &
+                        Chi_xyyy_tensor(ie,ieta,2,1), Chi_xyyy_tensor(ie,ieta,2,2), Chi_xyyy_tensor(ie,ieta,2,1) + Chi_xyyy_tensor(ie,ieta,2,2),&
+                        Chi_yxxx_tensor(ie,ieta,2,1), Chi_yxxx_tensor(ie,ieta,2,2), Chi_yxxx_tensor(ie,ieta,2,1) + Chi_yxxx_tensor(ie,ieta,2,2)
+                enddo
+                close(outfileindex)
+            endif
+        enddo
+    endif
+
+end subroutine
+
+
 subroutine drude_weight
 
     use wmpi

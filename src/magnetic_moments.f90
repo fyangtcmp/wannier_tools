@@ -7,9 +7,10 @@ module magnetic_moments
     real(dp), parameter :: Lande_g_L = 1d0
 
 contains
-    subroutine spin_magnetic_moments(M_S)
-        !> extend the 2x2 pauli matrices to the wannier basis, without any units
-        !> It is operators, so you need to do <psi| M_S |psi> yourself
+    subroutine spin_matrix(M_S)
+        !> extend the 2x2 pauli matrices to the wannier basis
+        !> without any units
+        !> output only the operators
 
         use para, only: Package
         implicit none
@@ -46,12 +47,40 @@ contains
                 M_S(j+nwann, j+nwann, 3)= -1d0
             enddo
         endif
-        return
+    end subroutine
+
+    subroutine spin_magnetic_moments(UU, M_S)
+        !> extend the 2x2 pauli matrices to the wannier basis
+        !> without units
+        !> output the <M_S>, not the operators
+
+        use para, only: Package
+        implicit none
+
+        complex(dp), intent(in)  :: UU(Num_wann, Num_wann)
+        complex(dp), intent(out) :: M_S(Num_wann, Num_wann, 3)
+        complex(dp), allocatable :: UU_dag(:, :), Amat(:, :)
+
+        allocate( UU_dag(Num_wann, Num_wann), Amat(Num_wann, Num_wann) )
+        UU_dag= conjg(transpose(UU))
+        
+        call spin_matrix(M_S)
+
+        call mat_mul(Num_wann, M_S(:,:,1), UU, Amat)
+        call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,1)) 
+        call mat_mul(Num_wann, M_S(:,:,2), UU, Amat) 
+        call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,2))
+        call mat_mul(Num_wann, M_S(:,:,3), UU, Amat) 
+        call mat_mul(Num_wann, UU_dag, Amat, M_S(:,:,3))
+
+        M_S = -0.5d0 * Lande_g_S * M_S
+
     end subroutine spin_magnetic_moments
 
-    subroutine orbital_magnetic_moments(W, velocities, M_L) !> without units, so we divide the M_L(Hartree/T) by mu_B(Hartree/T)
-        !> SciPost Phys. 14, 118 (2023), Eq 24b
-        !> It is NOT operators, which means M_tot = <psi| M_S |psi> + M_L
+    subroutine orbital_magnetic_moments(W, velocities, M_L) 
+        !> ref: SciPost Phys. 14, 118 (2023), Eq 24b
+        !> without units, so we divide the M_L(Hartree/T) by mu_B(Hartree/T)
+        !> output the <M_L>, not the operators
 
         implicit none
 
@@ -78,7 +107,7 @@ contains
             enddo !n
         enddo !l
         
-        M_L = M_L /zi/4 * Echarge / hbar * Bohr_radius**2 /mu_B
+        M_L = Lande_g_L * M_L /zi/4 * Echarge / hbar * Bohr_radius**2 /mu_B
         return
     end subroutine orbital_magnetic_moments
 end module

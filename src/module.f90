@@ -458,6 +458,7 @@
 
      logical :: sigma_SOAHC_int_calc = .false.
      logical :: sigma_NPHC_int_calc = .false.
+     logical :: sigma_NPHC_tau2_calc = .false.
      logical :: band_geo_props_kplane_calc = .false.
      logical :: drude_weight_calc = .false.
      logical :: sigma_TRAHC_calc = .false.
@@ -493,7 +494,7 @@
                           LandauLevel_B_dos_calc,LanczosBand_calc,LanczosDos_calc, &
                           LandauLevel_B_calc, LandauLevel_kplane_calc,landau_chern_calc, &
                           FermiLevel_calc,ANE_calc, export_newhr,export_maghr,w3d_nested_calc, &
-                          sigma_SOAHC_int_calc, sigma_NPHC_int_calc, band_geo_props_kplane_calc, &
+                          sigma_SOAHC_int_calc, sigma_NPHC_int_calc, sigma_NPHC_tau2_calc, band_geo_props_kplane_calc, &
                           drude_weight_calc, sigma_TRAHC_calc
 
      integer :: Nslab  ! Number of slabs for 2d Slab system

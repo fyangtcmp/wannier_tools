@@ -157,6 +157,7 @@ subroutine readinput
    ChargeDensity_selected_energies_calc= .FALSE.
    sigma_SOAHC_int_calc = .FALSE.
    sigma_NPHC_int_calc = .FALSE.
+   sigma_NPHC_tau2_calc = .FALSE.
    band_geo_props_kplane_calc = .FALSE.
    drude_weight_calc = .FALSE.
    sigma_TRAHC_calc = .FALSE.
@@ -218,6 +219,7 @@ subroutine readinput
       write(*, *)"The default Vaule is F"
       write(*, *)"sigma_SOAHC_int_calc"
       write(*, *)"sigma_NPHC_int_calc"
+      write(*, *)"sigma_NPHC_tau2_calc"
       write(*, *)"band_geo_props_kplane_calc"
       write(*, *)"drude_weight_calc"
       write(*, *)"sigma_TRAHC_calc"
@@ -299,6 +301,7 @@ subroutine readinput
       write(stdout, *) "ChargeDensity_selected_energies_calc : ", ChargeDensity_selected_energies_calc
       write(stdout, *) "sigma_SOAHC_int_calc              : ", sigma_SOAHC_int_calc
       write(stdout, *) "sigma_NPHC_int_calc               : ", sigma_NPHC_int_calc
+      write(stdout, *) "sigma_NPHC_tau2_calc              : ", sigma_NPHC_tau2_calc
       write(stdout, *) "band_geo_props_kplane_calc        : ", band_geo_props_kplane_calc
       write(stdout, *) "drude_weight_calc                 : ", drude_weight_calc
       write(stdout, *) "sigma_TRAHC_calc                  : ", sigma_TRAHC_calc

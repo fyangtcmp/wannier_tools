@@ -573,7 +573,7 @@ subroutine sigma_ahc_vary_ChemicalPotential(NumOfmu, mulist, NumberofEta, eta_ar
      eta_array= eta_array*Eta_Arc
 
      nwann= Num_wann/2
-     call spin_magnetic_moments(pauli_matrices)
+     call spin_matrix(pauli_matrices)
 
    
      !> energy range (chemical potential range)
