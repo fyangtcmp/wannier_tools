@@ -140,11 +140,7 @@ subroutine ISOAHC_dist_single_k_Ef(k_in, props)
             G_yy= G_yy+ 2.d0*real(vy(m, n)*vy(n, m)/((W(m)-W(n))**3))
         enddo ! n
         
-        if (W(m)/Eta_Arc<50) then
-            diffFermi= -Exp(W(m)/Eta_Arc)/(Exp(W(m)/Eta_Arc)+1d0)**2 /Eta_Arc
-        else
-            diffFermi=0d0
-        endif
+        diffFermi = -1d0 / (Exp((W(m) + E_arc)/Eta_array(ieta))+1d0) / (Exp(-(W(m) + E_arc)/Eta_array(ieta))+1d0) / Eta_array(ieta)
 
         props(1) = props(1) + G_xx * diffFermi
         props(2) = props(2) + G_xy * diffFermi
@@ -404,7 +400,7 @@ subroutine INPHC_dist_single_k_Ef(k_in, props)
         enddo ! m
 
         !> this format is very important! prevent NaN error
-        diffFermi = -1d0 / (Exp((W(n) - 0d0)/Eta_Arc)+1d0) / (Exp(-(W(n) - 0d0)/Eta_Arc)+1d0) / Eta_Arc
+        diffFermi = -1d0 / (Exp((W(n) + E_arc)/Eta_Arc)+1d0) / (Exp(-(W(n) + E_arc)/Eta_Arc)+1d0) / Eta_Arc
 
         ieta = 1
         if (include_m_spin) then

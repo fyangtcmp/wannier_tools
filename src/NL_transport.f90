@@ -163,7 +163,7 @@ contains
     end subroutine Lambda_abc_df
 
 
-    subroutine sigma_ISOAHC_single_k(k_in, sigma_xyy_k, sigma_yxx_k)
+    subroutine sigma_SOAHC_int_single_k(k_in, sigma_xyy_k, sigma_yxx_k)
         implicit none
     
         real(dp), intent(in)  :: k_in(3)
@@ -197,10 +197,10 @@ contains
     
         call Lambda_abc_df(W, velocities, sigma_xyy_k, sigma_yxx_k)
     
-    end subroutine sigma_ISOAHC_single_k
+    end subroutine sigma_SOAHC_int_single_k
 
 
-    subroutine sigma_INPHC_single_k(k_in, Chi_xyyy_k, Chi_yxxx_k)
+    subroutine sigma_NPHC_int_single_k(k_in, Chi_xyyy_k, Chi_yxxx_k)
         use magnetic_moments
         use para
         implicit none
@@ -580,7 +580,7 @@ contains
     end subroutine
 
 
-    subroutine sigma_INPHC_single_k_2(k_in, Chi_xyyx_k, Chi_yxxy_k)
+    subroutine sigma_NPHC_int_single_k_2(k_in, Chi_xyyx_k, Chi_yxxy_k)
         use magnetic_moments
         use para
         implicit none

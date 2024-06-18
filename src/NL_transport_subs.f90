@@ -257,7 +257,7 @@ subroutine sigma_TRAHC ! dynamical mpi version
 end subroutine
 
 
-subroutine sigma_ISOAHC
+subroutine sigma_SOAHC_int
 
     !> Calculate the intrinsic second order anomalous hall conductivity, the xyy and yxx elements
     !
@@ -314,7 +314,7 @@ subroutine sigma_ISOAHC
 
         call ik_to_kpoint(ik,k)
 
-        call sigma_ISOAHC_single_k(k, sigma_xyy_k, sigma_yxx_k)
+        call sigma_SOAHC_int_single_k(k, sigma_xyy_k, sigma_yxx_k)
 
         sigma_xyy_mpi = sigma_xyy_mpi + sigma_xyy_k
         sigma_yxx_mpi = sigma_yxx_mpi + sigma_yxx_k
@@ -341,7 +341,7 @@ subroutine sigma_ISOAHC
     if (cpuid.eq.0) then
         do ieta=1, Eta_number
             write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
-            write(ahcfilename, '(7a)')'sigma_ISOAHC_eta', trim(adjustl(Eta_name)), 'meV.dat'
+            write(ahcfilename, '(7a)')'sigma_SOAHC_int_eta', trim(adjustl(Eta_name)), 'meV.dat'
             open(unit=outfileindex, file=ahcfilename)
             write(outfileindex, '("#",a)')' Intrinsic 2nd anomalous hall conductivity'
             write(outfileindex, '("#",a)')' in unit of A*V^-2 for 3D cases, Ang*A*V^-2 for 2D cases'
@@ -354,10 +354,10 @@ subroutine sigma_ISOAHC
         enddo
     endif
 
-end subroutine sigma_ISOAHC
+end subroutine sigma_SOAHC_int
 
 
-subroutine sigma_INPHC_static
+subroutine sigma_NPHC_int_static
     !> Calculate the intrinsic nonlinear planar Hall conductivity, the xyyy and yxxx elements
     !
     !> usage: sigma_NPHC_int_calc = T
@@ -372,7 +372,7 @@ subroutine sigma_INPHC_static
     use nonlinear_transport
     implicit none
 
-    real(dp), parameter :: INPHC_unit_factor = -Echarge**3/hbar/Hartree2J * mu_B
+    real(dp), parameter :: NPHC_int_unit_factor = -Echarge**3/hbar/Hartree2J * mu_B
 
     real(dp), allocatable :: Chi_xyyy_k         (:,:,:,:)
     real(dp), allocatable :: Chi_yxxx_k         (:,:,:,:)
@@ -422,7 +422,7 @@ subroutine sigma_INPHC_static
 
         call ik_to_kpoint(ik,k)
 
-        call sigma_INPHC_single_k(k, Chi_xyyy_k, Chi_yxxx_k)
+        call sigma_NPHC_int_single_k(k, Chi_xyyy_k, Chi_yxxx_k)
 
         max_tmp(1) = maxval(abs(Chi_xyyy_k))
         max_tmp(2) = maxval(abs(Chi_yxxx_k))
@@ -450,7 +450,7 @@ subroutine sigma_INPHC_static
         call ik_to_kpoint(ik,k)
  
         do ikfine=1, knv3_fine
-            call sigma_INPHC_single_k(k + k_fine_list(ikfine,:), Chi_xyyy_k, Chi_yxxx_k)
+            call sigma_NPHC_int_single_k(k + k_fine_list(ikfine,:), Chi_xyyy_k, Chi_yxxx_k)
 
             Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi + Chi_xyyy_k/dble(knv3_fine)
             Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi + Chi_yxxx_k/dble(knv3_fine)
@@ -465,8 +465,8 @@ subroutine sigma_INPHC_static
     call mpi_reduce(Chi_yxxx_tensor_mpi, Chi_yxxx_tensor, size(Chi_yxxx_tensor), mpi_dp,mpi_sum, 0, mpi_cmw,ierr)
 #endif
 
-    Chi_xyyy_tensor = Chi_xyyy_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-    Chi_yxxx_tensor = Chi_yxxx_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+    Chi_xyyy_tensor = Chi_xyyy_tensor * NPHC_int_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+    Chi_yxxx_tensor = Chi_yxxx_tensor * NPHC_int_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
 
     if (Nk3==1) then
         Chi_xyyy_tensor = Chi_xyyy_tensor* Origin_cell%Ruc(3)/Ang2Bohr
@@ -479,7 +479,7 @@ subroutine sigma_INPHC_static
             write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
 
             if (include_m_spin) then
-                write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
+                write(ahcfilename, '(7a)')'sigma_NPHC_int_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
                 write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D cases, Ang*A*V^-2*T^-1 for 2D cases'
                 write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
@@ -494,7 +494,7 @@ subroutine sigma_INPHC_static
             endif
 
             if (include_m_orb ) then
-                write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
+                write(ahcfilename, '(7a)')'sigma_NPHC_int_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
                 write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D case, Ang*A*V^-2*T^-1 for 2D cases'
                 write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
@@ -513,7 +513,7 @@ subroutine sigma_INPHC_static
 end subroutine
 
 
-subroutine sigma_INPHC ! dynamical mpi version
+subroutine sigma_NPHC_int ! dynamical mpi version
     !> Calculate the intrinsic nonlinear planar Hall conductivity, the xyyy and yxxx elements
     !
     !> usage: sigma_NPHC_int_calc = T
@@ -528,7 +528,7 @@ subroutine sigma_INPHC ! dynamical mpi version
     use nonlinear_transport
     implicit none
 
-    real(dp), parameter :: INPHC_unit_factor = -Echarge**3/hbar/Hartree2J * mu_B
+    real(dp), parameter :: NPHC_int_unit_factor = -Echarge**3/hbar/Hartree2J * mu_B
 
     real(dp), allocatable :: Chi_xyyy_k         (:,:,:,:)
     real(dp), allocatable :: Chi_yxxx_k         (:,:,:,:)
@@ -589,7 +589,7 @@ subroutine sigma_INPHC ! dynamical mpi version
 
             if (ik>knv3) exit
             call ik_to_kpoint(ik,k)
-            call sigma_INPHC_single_k(k, Chi_xyyy_k, Chi_yxxx_k)
+            call sigma_NPHC_int_single_k(k, Chi_xyyy_k, Chi_yxxx_k)
 
             max_tmp(1) = maxval(abs(Chi_xyyy_k))
             max_tmp(2) = maxval(abs(Chi_yxxx_k))
@@ -631,7 +631,7 @@ subroutine sigma_INPHC ! dynamical mpi version
             if (ik>knv3) exit
             call ik_to_kpoint(ik,k)
             do ikfine=1, knv3_fine
-                call sigma_INPHC_single_k(k + k_fine_list(ikfine,:), Chi_xyyy_k, Chi_yxxx_k)
+                call sigma_NPHC_int_single_k(k + k_fine_list(ikfine,:), Chi_xyyy_k, Chi_yxxx_k)
     
                 Chi_xyyy_tensor_mpi = Chi_xyyy_tensor_mpi + Chi_xyyy_k/dble(knv3_fine)
                 Chi_yxxx_tensor_mpi = Chi_yxxx_tensor_mpi + Chi_yxxx_k/dble(knv3_fine)
@@ -644,8 +644,8 @@ subroutine sigma_INPHC ! dynamical mpi version
 #endif
 
     if (cpuid==0) then
-        Chi_xyyy_tensor = Chi_xyyy_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
-        Chi_yxxx_tensor = Chi_yxxx_tensor * INPHC_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+        Chi_xyyy_tensor = Chi_xyyy_tensor * NPHC_int_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
+        Chi_yxxx_tensor = Chi_yxxx_tensor * NPHC_int_unit_factor /dble(knv3)/Origin_cell%CellVolume*kCubeVolume/Origin_cell%ReciprocalCellVolume
 
         if (Nk3==1) then
             Chi_xyyy_tensor = Chi_xyyy_tensor* Origin_cell%Ruc(3)/Ang2Bohr
@@ -657,7 +657,7 @@ subroutine sigma_INPHC ! dynamical mpi version
             write(Eta_name, '(f12.2)') Eta_array(ieta)*1000d0/eV2Hartree
 
             if (include_m_spin) then
-                write(ahcfilename, '(7a)')'sigma_INPHC_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
+                write(ahcfilename, '(7a)')'sigma_NPHC_int_S_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
                 write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D case, Ang*A*V^-2*T^-1 for 2D cases'
                 write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'
@@ -672,7 +672,7 @@ subroutine sigma_INPHC ! dynamical mpi version
             endif
 
             if (include_m_orb ) then
-                write(ahcfilename, '(7a)')'sigma_INPHC_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
+                write(ahcfilename, '(7a)')'sigma_NPHC_int_L_eta', trim(adjustl(Eta_name)), 'meV.dat'
                 open(unit=outfileindex, file=ahcfilename)
                 write(outfileindex, '("#",a)')' Intrinsic nonlinear planar hall effect, in unit of A*V^-2*T^-1 for 3D case, Ang*A*V^-2*T^-1 for 2D cases'
                 write(outfileindex, '("#",a)')' Please refer to the Sec. III of the supplementary materials of 10.1103/PhysRevLett.130.126303, for the definition of term I and term II of the INPHE conductivities'

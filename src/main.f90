@@ -779,7 +779,7 @@
          if(cpuid.eq.0)write(stdout, *)' '
          if(cpuid.eq.0)write(stdout, *)
          call now(time_start)
-         call sigma_ISOAHC
+         call sigma_SOAHC_int
          call now(time_end)
          call print_time_cost(time_start, time_end, 'sigma_SOAHC_int')
          if(cpuid.eq.0)write(stdout, *)
@@ -790,7 +790,7 @@
          if(cpuid.eq.0)write(stdout, *)' '
          if(cpuid.eq.0)write(stdout, *)
          call now(time_start)
-         call sigma_INPHC
+         call sigma_NPHC_int
          call now(time_end)
          call print_time_cost(time_start, time_end, 'sigma_NPHC_int')
          if(cpuid.eq.0)write(stdout, *)
