@@ -52,15 +52,14 @@ subroutine band_geo_props_kplane
         endif 
 
         k= kslice(ik, :)
-        ! call ISOAHC_dist_single_k_Ef(k,  props_mpi(ik, 1:6))
-        call INPHC_dist_single_k_Ef(k,  props_mpi(ik, 1:6))
+        call ISOAHC_dist_single_k_Ef(k,  props_mpi(ik, 1:6))
+        ! call INPHC_dist_single_k_Ef(k,  props_mpi(ik, 1:6))
 
     enddo ! ik
 
 #if defined (MPI)
     call mpi_allreduce(props_mpi, props, size(props), mpi_dp,mpi_sum,mpi_cmw,ierr)
 #endif
-    props = props * (-Echarge/Hartree2J * mu_B) / (Ang2Bohr)**3 ! (e^2)/hbar * Angstorm^3 * (Ohm * V * T)^-1
 
     !> write the Berry curvature to file
     outfileindex= outfileindex+ 1
@@ -140,7 +139,7 @@ subroutine ISOAHC_dist_single_k_Ef(k_in, props)
             G_yy= G_yy+ 2.d0*real(vy(m, n)*vy(n, m)/((W(m)-W(n))**3))
         enddo ! n
         
-        diffFermi = -1d0 / (Exp((W(m) + E_arc)/Eta_array(ieta))+1d0) / (Exp(-(W(m) + E_arc)/Eta_array(ieta))+1d0) / Eta_array(ieta)
+        diffFermi = -1d0 / (Exp((W(m) - E_arc)/Eta_Arc)+1d0) / (Exp(-(W(m) - E_arc)/Eta_Arc)+1d0) / Eta_Arc
 
         props(1) = props(1) + G_xx * diffFermi
         props(2) = props(2) + G_xy * diffFermi
@@ -156,7 +155,7 @@ subroutine ISOAHC_dist_single_k_Ef(k_in, props)
 end subroutine
 
 
-subroutine INPHC_dist_single_k_Ef(k_in, props)
+subroutine INPHC_dist_single_k_Ef(k_in, props) ! (e^2)/hbar * Angstorm^3 * (Ohm * V * T)^-1
 
     use nonlinear_transport
     use magnetic_moments
@@ -283,7 +282,7 @@ subroutine INPHC_dist_single_k_Ef(k_in, props)
     Chi_xyyx_k = 0d0
     Chi_yxxy_k = 0d0
 
-    do n= Numoccupied-2, Numoccupied+3
+    do n= 1, Num_wann ! Numoccupied-2, Numoccupied+3
         if (W(n)<OmegaMin- 2.d-2 .or. W(n)>OmegaMax+ 2.d-2) cycle !> prevent NaN error
         G_xx= 0d0
         G_xy= 0d0
@@ -400,7 +399,7 @@ subroutine INPHC_dist_single_k_Ef(k_in, props)
         enddo ! m
 
         !> this format is very important! prevent NaN error
-        diffFermi = -1d0 / (Exp((W(n) + E_arc)/Eta_Arc)+1d0) / (Exp(-(W(n) + E_arc)/Eta_Arc)+1d0) / Eta_Arc
+        diffFermi = -1d0 / (Exp((W(n) - E_arc)/Eta_Arc)+1d0) / (Exp(-(W(n) - E_arc)/Eta_Arc)+1d0) / Eta_Arc
 
         ieta = 1
         if (include_m_spin) then
@@ -437,5 +436,7 @@ subroutine INPHC_dist_single_k_Ef(k_in, props)
     props(4) = sum(Chi_yxxy_k(1,1,:,:))
     props(5) = 0d0
     props(6) = 0d0
+
+    props = props * (-Echarge/Hartree2J * mu_B) / (Ang2Bohr)**3
 
 end subroutine
