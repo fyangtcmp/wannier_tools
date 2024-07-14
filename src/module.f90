@@ -462,6 +462,7 @@
      logical :: band_geo_props_kplane_calc = .false.
      logical :: drude_weight_calc = .false.
      logical :: sigma_TRAHC_calc = .false.
+     character(80) :: options1
      
      namelist / Control / BulkBand_calc, BulkFS_calc,  BulkFS_Plane_calc, &
                           BulkFS_plane_stack_calc,  BulkGap_plane_calc, &
@@ -495,7 +496,7 @@
                           LandauLevel_B_calc, LandauLevel_kplane_calc,landau_chern_calc, &
                           FermiLevel_calc,ANE_calc, export_newhr,export_maghr,w3d_nested_calc, &
                           sigma_SOAHC_int_calc, sigma_NPHC_int_calc, sigma_NPHC_tau2_calc, band_geo_props_kplane_calc, &
-                          drude_weight_calc, sigma_TRAHC_calc
+                          drude_weight_calc, sigma_TRAHC_calc, options1
 
      integer :: Nslab  ! Number of slabs for 2d Slab system
      integer :: Nslab1 ! Number of slabs for 1D wire system

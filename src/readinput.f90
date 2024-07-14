@@ -161,6 +161,7 @@ subroutine readinput
    band_geo_props_kplane_calc = .FALSE.
    drude_weight_calc = .FALSE.
    sigma_TRAHC_calc = .FALSE.
+   options1 = ''
 
    read(1001, CONTROL, iostat=stat)
    SlabQPI_kplane_calc= SlabQPI_kplane_calc.or.SlabQPI_calc
@@ -305,6 +306,7 @@ subroutine readinput
       write(stdout, *) "band_geo_props_kplane_calc        : ", band_geo_props_kplane_calc
       write(stdout, *) "drude_weight_calc                 : ", drude_weight_calc
       write(stdout, *) "sigma_TRAHC_calc                  : ", sigma_TRAHC_calc
+      write(stdout, *) "options1                          : ", options1
    endif
 
 !===============================================================================================================!

@@ -52,8 +52,18 @@ subroutine band_geo_props_kplane
         endif 
 
         k= kslice(ik, :)
-        call ISOAHC_dist_single_k_Ef(k,  props_mpi(ik, 1:6))
-        ! call INPHC_dist_single_k_Ef(k,  props_mpi(ik, 1:6))
+
+        select case (options1)
+        case ("ISOAHC")
+            call ISOAHC_dist_single_k_Ef(k,  props_mpi(ik, 1:6))
+        case ("INPHC")
+            call INPHC_dist_single_k_Ef(k,  props_mpi(ik, 1:6))
+        case ("SHC")
+            call sigma_SHC_single_k_EF(k,  props_mpi(ik, 1:6))
+        case Default
+            write(stdout, '("ERROR: options1 must be specified")')
+            stop
+        end select
 
     enddo ! ik
 
@@ -65,15 +75,31 @@ subroutine band_geo_props_kplane
     outfileindex= outfileindex+ 1
     if (cpuid==0) then
         open(unit=outfileindex, file='band_geometry_kplane.dat')
-        write(outfileindex, '("#",1a11, 2a12, 12a15)') "kx (1/A)", "ky (1/A)", "kz (1/A)", &
-            'G_xx', 'G_xy', 'G_yx', 'G_yy', 'L_xyy', 'L_yxx' 
+        
+        select case (options1)
+        case ("ISOAHC")
+            write(outfileindex, '("# ISOAHC distributions")')
+            write(outfileindex, '("#")')
+            write(outfileindex, '("#",1a11, 2a12, 12a15)') "kx (1/A)", "ky (1/A)", "kz (1/A)", 'Gxx', 'Gxy', 'Gyx', 'Gyy', 'Lxyy', 'Lyxx' 
+        case ("INPHC")
+            write(outfileindex, '("# INPHC distributions")')
+            write(outfileindex, '("# unit: (e^2)/hbar * Angstorm^3 * (Ohm * V * T)^-1 ")') 
+            write(outfileindex, '("#",1a11, 2a12, 12a15)') "kx (1/A)", "ky (1/A)", "kz (1/A)", 'xyyy', 'yxxx', 'xyyx', 'yxxy', 'prop5', 'prop6' 
+        case ("SHC")
+            write(outfileindex, '("# SHC distributions")')
+            write(outfileindex, '("#",1a11, 2a12, 12a15)') "kx (1/A)", "ky (1/A)", "kz (1/A)", 'zx^x', 'zx^y', 'zx^z', 'prop4', 'prop5', 'prop6' 
+            write(outfileindex, '("#")')
+        case Default
+            close(outfileindex)
+            return
+        end select
 
         ik= 0
         do i= 1, nk1
             do j= 1, nk2
                 ik= ik+ 1
                 ! call rotate_k3_to_kplane(kslice_xyz(ik, :), kxy_plane)
-                write(outfileindex, '(3f12.6, 12E15.4e3)') kslice_xyz(ik, :)/Ang2Bohr, props(ik, :) ! kxy_plane*Angstrom2atomic, &
+                write(outfileindex, '(3f12.6, 12E15.4e3)') kslice_xyz(ik, :)*Ang2Bohr, props(ik, :) ! kxy_plane*Angstrom2atomic, &
             enddo
             ! write(outfileindex, *) ' '
         enddo
@@ -155,7 +181,7 @@ subroutine ISOAHC_dist_single_k_Ef(k_in, props)
 end subroutine
 
 
-subroutine INPHC_dist_single_k_Ef(k_in, props) ! (e^2)/hbar * Angstorm^3 * (Ohm * V * T)^-1
+subroutine INPHC_dist_single_k_Ef(k_in, props) 
 
     use nonlinear_transport
     use magnetic_moments
@@ -440,3 +466,127 @@ subroutine INPHC_dist_single_k_Ef(k_in, props) ! (e^2)/hbar * Angstorm^3 * (Ohm 
     props = props * (-Echarge/Hartree2J * mu_B) / (Ang2Bohr)**3
 
 end subroutine
+
+
+subroutine sigma_SHC_single_k_EF(k_in, props)
+
+    use wmpi
+    use para
+    use magnetic_moments
+    implicit none
+    
+    real(dp), intent(in)  :: k_in(3)
+    real(dp), intent(out) :: props(6)
+
+    integer :: m, n, ialpha, ibeta, igamma
+
+    real(dp) :: deno_fac
+
+    ! eigen value of H
+    real(dp), allocatable :: W(:)
+    complex(dp), allocatable :: Hamk_bulk(:, :)
+    complex(dp), allocatable :: UU(:, :)
+
+    !> sigma^gamma_{alpha, beta}, alpha, beta, gamma=1,2,3 for x, y, z
+    !>  sigma_tensor_shc(igamma, ialpha, ibeta)
+    real(dp), allocatable :: sigma_tensor_shc(:, :, :)
+    
+    !> Fermi-Dirac distribution
+    real(dp), external :: fermi
+
+    complex(dp), allocatable :: Vmn_Ham(:, :, :)
+    complex(dp), allocatable :: Vmn_wann(:, :, :)
+    complex(dp), allocatable :: spin_sigma(:, :)
+    complex(dp), allocatable :: j_spin_gamma_alpha(:, :)
+    complex(dp), allocatable :: mat_t(:, :)
+
+    !> Berry curvature vectors for all bands
+    real(dp),allocatable :: Omega_spin(:)
+
+    ! spin operator matrix spin_sigma_x,spin_sigma_y in spin_sigma_z representation
+    complex(Dp),allocatable :: pauli_matrices(:, :, :) 
+    
+    allocate(Vmn_Ham(Num_wann, Num_wann, 3))
+    allocate(Vmn_wann(Num_wann, Num_wann, 3))
+    allocate(spin_sigma(Num_wann, Num_wann))
+    allocate(j_spin_gamma_alpha(Num_wann, Num_wann))
+    allocate(Omega_spin(Num_wann))
+
+    allocate( W (Num_wann))
+    allocate( Hamk_bulk(Num_wann, Num_wann))
+    allocate( UU(Num_wann, Num_wann))
+    allocate( mat_t(Num_wann, Num_wann))
+    allocate( sigma_tensor_shc   (3, 3, 3))
+
+    allocate(pauli_matrices(Num_wann, Num_wann, 3))
+    spin_sigma= 0d0
+    sigma_tensor_shc    = 0d0
+    Hamk_bulk=0d0
+    UU= 0d0
+    Vmn_wann= 0d0
+    pauli_matrices= 0d0
+
+    call spin_matrix(pauli_matrices)
+
+    ! calculation bulk hamiltonian by a direct Fourier transformation of HmnR
+    call ham_bulk_atomicgauge(k_in, Hamk_bulk)
+    ! call ham_bulk_latticegauge(k, Hamk_bulk)
+
+    !> diagonalization by call zheev in lapack
+    UU= Hamk_bulk
+    call eigensystem_c( 'V', 'U', Num_wann, UU, W)
+
+    !> get velocity operator in Wannier basis
+    !> \partial_k H_nm
+    call dHdk_atomicgauge(k_in, Vmn_wann)
+
+    do ialpha= 1, 3
+        call rotation_to_Ham_basis(UU, Vmn_wann(:, :, ialpha), Vmn_Ham(:, :, ialpha))
+    enddo
+
+    !> spin axis igamma= x, y, z
+    do igamma= 1, 3
+        !> set Pauli matrix
+        spin_sigma= pauli_matrices(:, :, igamma)
+
+        !> calculate spin current operator j_spin_gamma_alpha^l_alpha= 1/2*{Sigma_gamma, v_alpha} 
+        ! in order to calculate SHC^z_xy
+        do ialpha= 1, 3
+            !> in Wannier basis
+            j_spin_gamma_alpha= 0d0
+            call mat_mul(Num_wann, spin_sigma, Vmn_wann(:, :, ialpha), j_spin_gamma_alpha(:, :))
+            call mat_mul(Num_wann, Vmn_wann(:, :, ialpha), spin_sigma, mat_t)
+            j_spin_gamma_alpha(:, :)= j_spin_gamma_alpha(:, :)+ mat_t
+            j_spin_gamma_alpha= j_spin_gamma_alpha/2d0
+        
+            !> rotate to Hamiltonian basis
+            mat_t= j_spin_gamma_alpha(:, :)
+            call rotation_to_Ham_basis(UU, mat_t, j_spin_gamma_alpha(:, :))
+
+            !> \Omega_spin^l_n^{\gamma}(k)=-2\sum_{m}*aimag(Im({js(\gamma),v(\alpha)}/2)_nm*v_beta_mn))/((w(n)-w(m))^2+eta_arc^2)
+            do ibeta= 1, 3
+                Omega_spin= 0d0
+                do n= 1, Num_wann
+                    do m= 1, Num_wann
+                        if (abs(W(n)-W(m)) < band_degeneracy_threshold) cycle
+                        deno_fac= -2d0/((W(n)-W(m))**2)
+                        Omega_spin(n)= Omega_spin(n)+ &
+                            aimag(j_spin_gamma_alpha(n, m)*Vmn_Ham(m, n, ibeta))*deno_fac*fermi(W(n)-E_arc, 1d0/Eta_Arc)
+                    enddo
+                enddo
+
+                !> sum over all "spin" Berry curvature below chemical potential mu
+                sigma_tensor_shc(igamma, ialpha, ibeta)= sum(Omega_spin(:))
+            enddo ! ibeta  v
+        enddo ! ialpha  j
+    enddo ! igamma  spin
+
+    !> in the latest version, we use the atomic unit
+    !> in unit of ((hbar/e)(Ohm*m)^-1
+    sigma_tensor_shc = sigma_tensor_shc * Echarge**2/hbar/Bohr_radius/2d0
+
+    props      = 0d0
+    props(1:3) = sigma_tensor_shc(1:3 ,3 ,1 )
+   
+    
+end subroutine 
